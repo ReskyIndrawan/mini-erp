@@ -45,20 +45,15 @@ jobs:
       - name: Build EXE (windowed) with icon
         id: build_with_icon
         shell: powershell
-        # Satu baris penuh tanpa backtick untuk menghindari parsing error
-        run: >
-          pyinstaller --clean --log-level=DEBUG --onefile --windowed --paths .
-          --hidden-import tabs.tab1_template --hidden-import tabs.tab2_entry --hidden-import excel_utils
-          --name 不良品データ管理システム --icon=icon.ico main.py
+        run: |
+          pyinstaller --clean --log-level=DEBUG --onefile --windowed --paths . --hidden-import tabs.tab1_template --hidden-import tabs.tab2_entry --hidden-import excel_utils --name "DefectDataManagementSystem" --icon=icon.ico main.py
         continue-on-error: true
 
       - name: Build EXE without icon (fallback)
         if: failure() && steps.build_with_icon.outcome == 'failure'
         shell: powershell
-        run: >
-          pyinstaller --clean --log-level=DEBUG --onefile --windowed --paths .
-          --hidden-import tabs.tab1_template --hidden-import tabs.tab2_entry --hidden-import excel_utils
-          --name 不良品データ管理システム main.py
+        run: |
+          pyinstaller --clean --log-level=DEBUG --onefile --windowed --paths . --hidden-import tabs.tab1_template --hidden-import tabs.tab2_entry --hidden-import excel_utils --name "DefectDataManagementSystem" main.py
 
       - name: Show PyInstaller logs if exist (debug)
         if: always()

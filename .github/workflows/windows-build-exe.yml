@@ -25,31 +25,33 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller
-          pip install openpyxl
-          if (Test-Path requirements.txt) { pip install -r requirements.txt }
-        shell: powershell
-
-      - name: Create requirements.txt if not exists
-        run: |
-          if (!(Test-Path requirements.txt)) {
+          if (Test-Path requirements.txt) {
+            pip install -r requirements.txt
+          } else {
             echo "openpyxl" > requirements.txt
+            pip install -r requirements.txt
           }
         shell: powershell
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --name "不良品データ管理システム" --icon=icon.ico main.py
+          pyinstaller --onefile --windowed ^
+            --hidden-import=tabs.tab1_template ^
+            --hidden-import=tabs.tab2_entry ^
+            --hidden-import=excel_utils ^
+            --name "不良品データ管理システム" ^
+            --icon=icon.ico main.py
+        shell: cmd
         continue-on-error: true
 
       - name: Build EXE without icon (fallback)
         if: failure()
         run: |
           pyinstaller --onefile --windowed --name "不良品データ管理システム" main.py
+        shell: cmd
 
       - name: List dist contents
-        run: |
-          dir dist
+        run: dir dist
         shell: cmd
 
       - name: Upload EXE artifact

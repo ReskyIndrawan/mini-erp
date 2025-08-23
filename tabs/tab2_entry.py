@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import os, datetime, calendar, shutil, subprocess
 from openpyxl import load_workbook
+from excel_utils import ExcelHistoryManager
 
 
 # ==============================
@@ -458,6 +459,172 @@ class FilterDialog(tk.Toplevel):
 
 
 # ==============================
+# For record history of file
+# ==============================
+class ExcelHistoryDialog(tk.Toplevel):
+    def __init__(self, parent, callback, history_manager):
+        super().__init__(parent)
+        self.callback = callback
+        self.history_manager = history_manager
+        self.result = None
+        self.title("Excel履歴")  # Excel History
+        self.geometry("600x400")
+        self.transient(parent)
+        self.grab_set()
+        self.build_ui()
+
+    def build_ui(self):
+        main_frame = tk.Frame(self, padx=20, pady=20)
+        main_frame.pack(fill="both", expand=True)
+
+        # Title
+        tk.Label(
+            main_frame, text="最近使用したExcelファイル", font=("Arial", 12, "bold")
+        ).pack(anchor="w", pady=(0, 10))
+
+        # History list with scrollbar
+        list_frame = tk.Frame(main_frame)
+        list_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Listbox with scrollbar
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side="right", fill="y")
+
+        self.listbox = tk.Listbox(
+            list_frame, yscrollcommand=scrollbar.set, font=("Arial", 9)
+        )
+        self.listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=self.listbox.yview)
+
+        # Double click to select
+        self.listbox.bind("<Double-Button-1>", self.on_double_click)
+
+        # Load history items
+        self.load_history()
+
+        # Buttons frame
+        btn_frame = tk.Frame(main_frame)
+        btn_frame.pack(fill="x", pady=(10, 0))
+
+        tk.Button(
+            btn_frame, text="開く", command=self.open_selected, width=10, bg="#d4edda"
+        ).pack(side="left", padx=(0, 5))
+        tk.Button(
+            btn_frame, text="削除", command=self.remove_selected, width=10, bg="#f8d7da"
+        ).pack(side="left", padx=5)
+        tk.Button(
+            btn_frame, text="全削除", command=self.clear_all, width=10, bg="#f8d7da"
+        ).pack(side="left", padx=5)
+        tk.Button(
+            btn_frame, text="キャンセル", command=self.destroy, width=10, bg="#f8f9fa"
+        ).pack(side="right")
+
+        self.center_window()
+
+    def center_window(self):
+        self.update_idletasks()
+        x = (self.winfo_screenwidth() // 2) - (self.winfo_width() // 2)
+        y = (self.winfo_screenheight() // 2) - (self.winfo_height() // 2)
+        self.geometry(f"+{x}+{y}")
+
+    def load_history(self):
+        """Load history items into listbox"""
+        self.listbox.delete(0, tk.END)
+        items = self.history_manager.items()
+
+        if not items:
+            self.listbox.insert(tk.END, "（履歴がありません）")
+            return
+
+        for i, path in enumerate(items):
+            # Show filename and path
+            filename = os.path.basename(path)
+            display_text = f"{i+1}. {filename}"
+
+            # Check if file exists
+            if not os.path.exists(path):
+                display_text += " (ファイルが見つかりません)"
+
+            self.listbox.insert(tk.END, display_text)
+
+            # Store full path as data
+            self.listbox.insert(tk.END, f"   📁 {path}")
+
+    def on_double_click(self, event):
+        """Handle double click on listbox item"""
+        self.open_selected()
+
+    def open_selected(self):
+        """Open selected file"""
+        selection = self.listbox.curselection()
+        if not selection:
+            messagebox.showwarning("警告", "ファイルを選択してください。")
+            return
+
+        # Get the selected index (considering display format)
+        selected_idx = selection[0]
+        items = self.history_manager.items()
+
+        if not items:
+            return
+
+        # Calculate actual file index (every file takes 2 lines in listbox)
+        file_idx = selected_idx // 2
+
+        if file_idx >= len(items):
+            return
+
+        file_path = items[file_idx]
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            response = messagebox.askyesno(
+                "ファイルが見つかりません",
+                f"ファイルが見つかりません：\n{file_path}\n\n履歴から削除しますか？",
+            )
+            if response:
+                self.history_manager.remove(file_path)
+                self.load_history()
+            return
+
+        # Call callback with selected file
+        self.result = file_path
+        self.callback(file_path)
+        self.destroy()
+
+    def remove_selected(self):
+        """Remove selected file from history"""
+        selection = self.listbox.curselection()
+        if not selection:
+            messagebox.showwarning("警告", "削除するファイルを選択してください。")
+            return
+
+        selected_idx = selection[0]
+        items = self.history_manager.items()
+
+        if not items:
+            return
+
+        file_idx = selected_idx // 2
+
+        if file_idx >= len(items):
+            return
+
+        file_path = items[file_idx]
+        filename = os.path.basename(file_path)
+
+        if messagebox.askyesno("確認", f"履歴から削除しますか？\n{filename}"):
+            self.history_manager.remove(file_path)
+            self.load_history()
+
+    def clear_all(self):
+        """Clear all history"""
+        if messagebox.askyesno("確認", "すべての履歴を削除しますか？"):
+            self.history_manager.clear()
+            self.load_history()
+
+
+# ==============================
 # Tab2Entry (Master-Detail Layout with Filter)
 # ==============================
 class Tab2Entry:
@@ -466,6 +633,7 @@ class Tab2Entry:
         self.excel_path = None
         self.selected_sheet = None
         self.selected_row = None  # Excel row index
+        self.history_manager = ExcelHistoryManager()  # Initialize history manager
         self.all_data = []  # Store all Excel data for filtering
         self.header_row = None  # Dynamic header row detection
         self.data_start_row = None  # Dynamic data start row
@@ -495,9 +663,13 @@ class Tab2Entry:
         )
         self.btn_choose_file.pack(side="left")
         self.lbl_file = tk.Label(
-            file_row, text=JP_LABELS["not_selected"], width=30, anchor="w"
+            file_row, text=JP_LABELS["not_selected"], width=25, anchor="w"
         )
         self.lbl_file.pack(side="left", padx=8)
+        self.btn_history = tk.Button(
+            file_row, text="履歴📋", command=self.show_history, width=3, bg="#e9ecef"
+        )
+        self.btn_history.pack(side="left", padx=2)
 
         # Sheet selection row
         sheet_row = tk.Frame(sec_file)
@@ -1208,8 +1380,23 @@ class Tab2Entry:
         if path:
             self.excel_path = path
             self.lbl_file.config(text=os.path.basename(path))
+
+            # Add to history
+            self.history_manager.add(path)
+
             self.load_sheet_names()  # Load available sheets
             self.load_excel_to_tree()
+
+    def show_history(self):
+        """Show Excel file history dialog"""
+
+        def on_file_selected(file_path):
+            self.excel_path = file_path
+            self.lbl_file.config(text=os.path.basename(file_path))
+            self.load_sheet_names()
+            self.load_excel_to_tree()
+
+        ExcelHistoryDialog(self.root, on_file_selected, self.history_manager)
 
     def load_excel_to_tree(self):
         if not self.excel_path or not os.path.exists(self.excel_path):
@@ -1217,6 +1404,10 @@ class Tab2Entry:
 
         if not self.selected_sheet:
             return
+
+        if self.excel_path and os.path.exists(self.excel_path):
+            # Add to history when successfully opened
+            self.history_manager.add(self.excel_path)
 
         try:
             wb = load_workbook(self.excel_path)
@@ -1452,7 +1643,7 @@ class Tab2Entry:
 
         except Exception as e:
             messagebox.showerror(
-                JP_LABELS["error"], f"{JP_LABELS['error_add_row']} {str(e)}"
+                JP_LABELS["error"], f"{JP_LABELS['error_select_row']} {str(e)}"
             )
 
     def delete_row(self):

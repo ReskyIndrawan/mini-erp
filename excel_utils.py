@@ -1,10 +1,90 @@
 import os
 import datetime
+import json
+import sys
+from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 
 TITLE = "不具合品一覧表"
 EXCEL_NAME = "不具合品一覧表.xlsx"
+
+# History management constants
+APP_NAME = "defect_data_app"
+HISTORY_FILENAME = "recent_excel_files.json"
+MAX_HISTORY = 10
+
+
+def get_config_dir():
+    """Get cross-platform config directory"""
+    if sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / APP_NAME
+    # Prefer XDG_CONFIG_HOME if set, otherwise ~/.config
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / APP_NAME
+    return Path.home() / ".config" / APP_NAME
+
+
+class ExcelHistoryManager:
+    def __init__(self, max_items=MAX_HISTORY):
+        self.max_items = max_items
+        self.config_dir = get_config_dir()
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.path = self.config_dir / HISTORY_FILENAME
+        self._items = self._load()
+
+    def _load(self):
+        """Load history from JSON file"""
+        if self.path.exists():
+            try:
+                with open(self.path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                # ensure it's a list of strings
+                if isinstance(data, list):
+                    return [str(x) for x in data if isinstance(x, str)]
+            except Exception:
+                pass
+        return []
+
+    def save(self):
+        """Save history to JSON file"""
+        try:
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump(self._items, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print("Failed saving recent files:", e)
+
+    def add(self, filepath):
+        """Add file to history"""
+        filepath = str(Path(filepath).resolve())
+        if filepath in self._items:
+            self._items.remove(filepath)
+        self._items.insert(0, filepath)
+        self._items = self._items[: self.max_items]
+        self.save()
+
+    def clear(self):
+        """Clear all history"""
+        self._items = []
+        try:
+            if self.path.exists():
+                self.path.unlink()
+        except Exception:
+            pass
+
+    def items(self):
+        """Get all history items"""
+        return list(self._items)
+
+    def remove(self, filepath):
+        """Remove specific file from history"""
+        f = str(Path(filepath).resolve())
+        if f in self._items:
+            self._items.remove(f)
+            self.save()
 
 
 def create_excel_if_not_exists(folder, creator):

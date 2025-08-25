@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+import urllib.parse
 
 TITLE = "不具合品一覧表"
 EXCEL_NAME = "不具合品一覧表.xlsx"
@@ -139,6 +140,78 @@ def create_excel_if_not_exists(folder, creator):
 
         wb.save(filepath)
     return filepath
+
+
+def normalize_japanese_path(raw_path: str) -> str:
+    """
+    Normalize Windows path that may contain Japanese characters encoded in search-ms: URI format.
+    Converts search-ms: URI to normal Windows path string.
+    If input is already a normal path, returns as is.
+    """
+    if not raw_path:
+        return raw_path
+
+    raw_path = raw_path.strip()
+
+    # Jika path diawali dengan 'search-ms:', parse dan decode
+    if raw_path.lower().startswith("search-ms:"):
+        # Contoh format:
+        # search-ms:displayname=...&crumb=location:<encoded_path>
+        # Kita cari crumb=location: dan ambil sisanya
+
+        # Cari 'crumb=location:' di string
+        crumb_prefix = "crumb=location:"
+        idx = raw_path.lower().find(crumb_prefix)
+        if idx != -1:
+            # Ambil substring setelah crumb=location:
+            encoded_path = raw_path[idx + len(crumb_prefix) :]
+            # encoded_path bisa mengandung karakter %xx, decode URL
+            decoded_path = urllib.parse.unquote(encoded_path)
+
+            # Windows path biasanya diawali dengan \\server\share
+            # Pastikan diawali dengan backslash
+            if decoded_path.startswith("\\\\") or decoded_path.startswith("/"):
+                # Ganti / dengan \ jika ada
+                normalized_path = decoded_path.replace("/", "\\")
+                return normalized_path
+            else:
+                # Jika tidak sesuai, kembalikan hasil decode apa adanya
+                return decoded_path
+
+        else:
+            # Jika crumb=location: tidak ditemukan, kembalikan apa adanya
+            return raw_path
+
+    else:
+        # Jika bukan search-ms, kembalikan apa adanya
+        return raw_path
+
+
+def escape_path_for_japanese_locale(path: str) -> str:
+    """
+    Escape path ke format Unicode escaped agar kompatibel dengan sistem Jepang.
+    Contoh: "C:\\テスト" -> "\\u0043\\u003a\\u005c\\u30c6\\u30b9\\u30c8"
+    """
+    if not path:
+        return path
+    # Escape semua karakter ke Unicode
+    return "".join(f"\\u{ord(c):04x}" for c in path)
+
+
+def unescape_path_for_japanese_locale(escaped_path: str) -> str:
+    """
+    Unescape path dari format Unicode escaped ke bentuk asli.
+    Contoh: "\\u0043\\u003a\\u005c\\u30c6\\u30b9\\u30c8" -> "C:\\テスト"
+    """
+    if not escaped_path:
+        return escaped_path
+    # Unescape \\uXXXX menjadi karakter asli
+    import codecs
+
+    try:
+        return codecs.decode(escaped_path, "unicode_escape")
+    except Exception:
+        return escaped_path  # Jika gagal, kembalikan apa adanya
 
 
 def append_excel(folder, rowdata, creator):

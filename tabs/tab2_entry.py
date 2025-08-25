@@ -1,8 +1,12 @@
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
-import os, datetime, calendar, shutil, subprocess
+import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
-from excel_utils import ExcelHistoryManager
+from excel_utils import (
+    ExcelHistoryManager,
+    escape_path_for_japanese_locale,
+    unescape_path_for_japanese_locale,
+)
 
 
 # ==============================
@@ -1346,8 +1350,15 @@ class Tab2Entry:
 
     def open_renrakusho_file(self):
         """Open the selected file"""
-        file_path = self.entry_renrakusho.get().strip()
-        if not file_path or not os.path.exists(file_path):
+        escaped_path = self.entry_renrakusho.get().strip()
+        if not escaped_path:
+            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
+            return
+
+        # Unescape path sebelum dibuka
+        file_path = unescape_path_for_japanese_locale(escaped_path)
+
+        if not os.path.exists(file_path):
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
@@ -1566,6 +1577,11 @@ class Tab2Entry:
             current_data_count = len(self.all_data)
             ruikei = current_data_count + 1
 
+            # Escape path untuk kompatibilitas Jepang
+            escaped_renrakusho_path = escape_path_for_japanese_locale(
+                self.entry_renrakusho.get() or ""
+            )
+
             vals = [
                 self.entry_hassei_month.get() or "",  # Convert empty to ""
                 ruikei,  # 累計 (col 2)
@@ -1577,7 +1593,7 @@ class Tab2Entry:
                 self.cbo_niji.get() or "",
                 self.entry_hinban.get() or "",
                 self.cbo_supplier.get() or "",
-                self.entry_renrakusho.get() or "",  # 不良発生連絡書発行 (col 11)
+                escaped_renrakusho_path,  # 不良発生連絡書発行 (col 11) - dalam format escaped
                 self.entry_furyo_no.get() or "",  # 不良発生№ (col 12)
             ]
             ws.append(vals)
@@ -1622,6 +1638,11 @@ class Tab2Entry:
             ws = wb[self.selected_sheet]
             row = self.selected_row
 
+            # Escape path untuk kompatibilitas Jepang
+            escaped_renrakusho_path = escape_path_for_japanese_locale(
+                self.entry_renrakusho.get() or ""
+            )
+
             ws.cell(row=row, column=1).value = self.entry_hassei_month.get() or ""
             # col 2 (累計) akan direindex ulang
             ws.cell(row=row, column=3).value = self.entry_no.get() or ""
@@ -1632,14 +1653,16 @@ class Tab2Entry:
             ws.cell(row=row, column=8).value = self.cbo_niji.get() or ""
             ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
-            ws.cell(row=row, column=11).value = self.entry_renrakusho.get() or ""
+            ws.cell(row=row, column=11).value = (
+                escaped_renrakusho_path  # Path dalam format escaped
+            )
             ws.cell(row=row, column=12).value = self.entry_furyo_no.get() or ""
 
             # reindex all
             self.reindex_excel(ws)
             wb.save(self.excel_path)
             self.load_excel_to_tree()
-            messagebox.showinfo(JP_LABELS["success"], JP_LABELS["added_ok"])
+            messagebox.showinfo(JP_LABELS["success"], JP_LABELS["updated_ok"])
 
         except Exception as e:
             messagebox.showerror(

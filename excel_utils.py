@@ -6,6 +6,7 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import urllib.parse
+import subprocess
 
 TITLE = "不具合品一覧表"
 EXCEL_NAME = "不具合品一覧表.xlsx"
@@ -187,31 +188,44 @@ def normalize_japanese_path(raw_path: str) -> str:
         return raw_path
 
 
-def escape_path_for_japanese_locale(path: str) -> str:
+def convert_path_to_display_style(path: str) -> str:
     """
-    Escape path ke format Unicode escaped agar kompatibel dengan sistem Jepang.
-    Contoh: "C:\\テスト" -> "\\u0043\\u003a\\u005c\\u30c6\\u30b9\\u30c8"
+    Ubah path Windows ke format tampilan Jepang dengan mengganti '\\' menjadi '¥'.
+    Digunakan saat menyimpan path ke Excel agar tampil seperti di lingkungan Jepang.
     """
     if not path:
         return path
-    # Escape semua karakter ke Unicode
-    return "".join(f"\\u{ord(c):04x}" for c in path)
+    return path.replace("\\", "¥")
 
 
-def unescape_path_for_japanese_locale(escaped_path: str) -> str:
+def convert_path_to_windows_style(path: str) -> str:
     """
-    Unescape path dari format Unicode escaped ke bentuk asli.
-    Contoh: "\\u0043\\u003a\\u005c\\u30c6\\u30b9\\u30c8" -> "C:\\テスト"
+    Ubah path dari format tampilan Jepang ('¥') kembali ke format Windows ('\\').
+    Digunakan saat membuka file dari path yang disimpan.
     """
-    if not escaped_path:
-        return escaped_path
-    # Unescape \\uXXXX menjadi karakter asli
-    import codecs
+    if not path:
+        return path
+    return path.replace("¥", "\\")
+
+
+def open_file_safely(file_path: str):
+    """Buka file dengan aman, mendukung path UNC dan karakter Unicode/Jepang."""
+    if not file_path:
+        raise ValueError("Path file tidak boleh kosong.")
+
+    real_path = convert_path_to_windows_style(file_path)
+
+    if not os.path.exists(real_path):
+        raise FileNotFoundError(f"File tidak ditemukan: {real_path}")
 
     try:
-        return codecs.decode(escaped_path, "unicode_escape")
-    except Exception:
-        return escaped_path  # Jika gagal, kembalikan apa adanya
+        if os.name == "nt":  # Windows
+            os.startfile(real_path)
+        elif os.name == "posix":  # macOS/Linux
+            opener = "open" if "darwin" in os.uname().sysname.lower() else "xdg-open"
+            subprocess.call([opener, real_path])
+    except Exception as e:
+        raise RuntimeError(f"Gagal membuka file: {e}")
 
 
 def append_excel(folder, rowdata, creator):

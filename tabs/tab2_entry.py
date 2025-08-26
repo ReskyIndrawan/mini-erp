@@ -2,10 +2,12 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
+from openpyxl.utils.datetime import from_excel
 from excel_utils import (
     ExcelHistoryManager,
-    escape_path_for_japanese_locale,
-    unescape_path_for_japanese_locale,
+    convert_path_to_display_style,
+    convert_path_to_windows_style,
+    open_file_safely,
 )
 
 
@@ -1355,27 +1357,10 @@ class Tab2Entry:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
-        # Unescape path sebelum dibuka
-        file_path = unescape_path_for_japanese_locale(escaped_path)
-
-        if not os.path.exists(file_path):
-            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
-            return
-
         try:
-            if os.name == "nt":  # Windows
-                os.startfile(file_path)
-            elif os.name == "posix":  # macOS/Linux
-                subprocess.call(
-                    [
-                        (
-                            "open"
-                            if "darwin" in os.uname().sysname.lower()
-                            else "xdg-open"
-                        ),
-                        file_path,
-                    ]
-                )
+            open_file_safely(escaped_path)
+        except FileNotFoundError:
+            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
         except Exception as e:
             messagebox.showerror(
                 JP_LABELS["error"], f"{JP_LABELS['cannot_open_file']} {str(e)}"
@@ -1417,13 +1402,11 @@ class Tab2Entry:
             return
 
         if self.excel_path and os.path.exists(self.excel_path):
-            # Add to history when successfully opened
             self.history_manager.add(self.excel_path)
 
         try:
             wb = load_workbook(self.excel_path)
 
-            # Select the specified sheet
             if self.selected_sheet in wb.sheetnames:
                 ws = wb[self.selected_sheet]
             else:
@@ -1433,52 +1416,91 @@ class Tab2Entry:
                 )
                 return
 
-            # Dynamically find table position
             self.find_table_position(ws)
 
-            # Get headers from detected header row
+            # Tentukan index kolom tanggal (発生日) dan 発生月
+            date_col_index = 3
+            date_month_col_index = 0
+
+            # Setup header dan kolom
             headers = [cell.value for cell in ws[self.header_row]]
-            # Clean headers (remove None values)
             headers = [
                 str(h) if h is not None else f"Column_{i}"
                 for i, h in enumerate(headers)
             ]
-
             self.tree["columns"] = headers
             self.tree.delete(*self.tree.get_children())
-
-            # Store all data for filtering
             self.all_data = []
 
-            # Auto-adjust column widths based on content
+            # Atur lebar kolom dengan format tanggal yang benar
             for i, h in enumerate(headers):
                 col_values = []
                 for row in ws.iter_rows(min_row=self.data_start_row, values_only=True):
-                    if i < len(row) and row[i] is not None:
-                        col_values.append(str(row[i]))
+                    if i < len(row):
+                        cell = row[i]
+                        if i == date_col_index and isinstance(cell, (int, float)):
+                            try:
+                                dt = from_excel(cell)
+                                formatted = dt.date().strftime("%Y-%m-%d")
+                            except Exception:
+                                formatted = str(cell)
+                        elif i == date_col_index and isinstance(
+                            cell, datetime.datetime
+                        ):
+                            formatted = cell.date().strftime("%Y-%m-%d")
+                        elif i == date_month_col_index and isinstance(
+                            cell, (int, float)
+                        ):
+                            try:
+                                dt = from_excel(cell)
+                                formatted = dt.strftime("%Y-%m")
+                            except Exception:
+                                formatted = str(cell)
+                        elif i == date_month_col_index and isinstance(
+                            cell, datetime.datetime
+                        ):
+                            formatted = cell.strftime("%Y-%m")
+                        else:
+                            formatted = "" if cell is None else str(cell)
+                        col_values.append(formatted)
                     else:
                         col_values.append("")
 
-                # Calculate optimal width
                 longest = max([len(str(h))] + [len(v) for v in col_values] + [10])
                 width = min(max(100, longest * 9), 600)
-
                 self.tree.heading(h, text=h)
                 self.tree.column(h, width=width, anchor="w", stretch=False)
 
-            # Load data starting from detected data row
+            # Masukkan data ke TreeView dengan format tanggal yang benar
             for row in ws.iter_rows(min_row=self.data_start_row, values_only=True):
-                # Convert None to empty string for display
-                clean_row = [cell if cell is not None else "" for cell in row]
+                clean_row = []
+                for i, cell in enumerate(row):
+                    if i == date_col_index and isinstance(cell, (int, float)):
+                        try:
+                            dt = from_excel(cell)
+                            clean_row.append(dt.date().strftime("%Y-%m-%d"))
+                        except Exception:
+                            clean_row.append(str(cell))
+                    elif i == date_col_index and isinstance(cell, datetime.datetime):
+                        clean_row.append(cell.date().strftime("%Y-%m-%d"))
+                    elif i == date_month_col_index and isinstance(cell, (int, float)):
+                        try:
+                            dt = from_excel(cell)
+                            clean_row.append(dt.strftime("%Y-%m-%d"))
+                        except Exception:
+                            clean_row.append(str(cell))
+                    elif i == date_month_col_index and isinstance(
+                        cell, datetime.datetime
+                    ):
+                        clean_row.append(cell.strftime("%Y-%m-%d"))
+                    else:
+                        clean_row.append("" if cell is None else str(cell))
                 self.tree.insert("", tk.END, values=clean_row)
-                # Store original data (with None values) for filtering
                 self.all_data.append(row)
 
-            # Update ruikei label (jumlah data)
-            data_count = len(self.all_data)
-            self.lbl_ruikei.config(text=str(data_count))
+            self.lbl_ruikei.config(text=str(len(self.all_data)))
             self.selected_row = None
-            self.update_button_states()  # Update button states
+            self.update_button_states()
 
         except Exception as e:
             messagebox.showerror(
@@ -1547,13 +1569,14 @@ class Tab2Entry:
 
         self.cbo_supplier.set(vals[9] if len(vals) > 9 else "")
 
-        # 不良発生連絡書発行
+        # 不良発生連絡書発行 (simpan dalam format tampilan)
         self.entry_renrakusho.delete(0, tk.END)
         renrakusho_path = vals[10] if len(vals) > 10 else ""
         self.entry_renrakusho.insert(0, renrakusho_path)
 
         # Enable/disable open button based on file existence
-        if renrakusho_path and os.path.exists(renrakusho_path):
+        real_path = convert_path_to_windows_style(renrakusho_path)
+        if real_path and os.path.exists(real_path):
             self.btn_open_file.config(state="normal")
         else:
             self.btn_open_file.config(state="disabled")
@@ -1573,19 +1596,18 @@ class Tab2Entry:
             wb = load_workbook(self.excel_path)
             ws = wb[self.selected_sheet]
 
-            # ruikei = jumlah data existing + 1
             current_data_count = len(self.all_data)
             ruikei = current_data_count + 1
 
-            # Escape path untuk kompatibilitas Jepang
-            escaped_renrakusho_path = escape_path_for_japanese_locale(
+            # Simpan path dalam format tampilan Jepang
+            renrakusho_path = convert_path_to_display_style(
                 self.entry_renrakusho.get() or ""
             )
 
             vals = [
-                self.entry_hassei_month.get() or "",  # Convert empty to ""
-                ruikei,  # 累計 (col 2)
-                self.entry_no.get() or "",  # № (col 3)
+                self.entry_hassei_month.get() or "",
+                ruikei,
+                self.entry_no.get() or "",
                 self.entry_date.get() or "",
                 self.cbo_koumoku.get() or "",
                 self.entry_jishou.get() or "",
@@ -1593,11 +1615,10 @@ class Tab2Entry:
                 self.cbo_niji.get() or "",
                 self.entry_hinban.get() or "",
                 self.cbo_supplier.get() or "",
-                escaped_renrakusho_path,  # 不良発生連絡書発行 (col 11) - dalam format escaped
-                self.entry_furyo_no.get() or "",  # 不良発生№ (col 12)
+                renrakusho_path,  # Disimpan dalam format tampilan
+                self.entry_furyo_no.get() or "",
             ]
             ws.append(vals)
-            # reindex setelah append untuk jaga konsistensi
             self.reindex_excel(ws)
             wb.save(self.excel_path)
             self.load_excel_to_tree()
@@ -1609,24 +1630,20 @@ class Tab2Entry:
             )
 
     def on_tree_select(self, event):
-        sel = self.tree.selection()
-        if not sel:
-            self.selected_row = None
-            self.update_button_states()
+        """Handle selection in main tree view"""
+        selected = self.tree.selection()
+        if not selected:
             return
 
-        try:
-            vals = self.tree.item(sel[0], "values")
-            self.selected_row = (
-                self.tree.index(sel[0]) + self.data_start_row
-            )  # Excel row index
-            self.fill_form_with_data(vals)
-            self.update_button_states()  # Update button states when row is selected
+        item = self.tree.item(selected[0])
+        vals = item.get("values", [])
+        self.fill_form_with_data(vals)
 
-        except Exception as e:
-            messagebox.showerror(
-                JP_LABELS["error"], f"{JP_LABELS['error_add_row']} {str(e)}"
-            )
+        # Set selected_row to Excel row index
+        self.selected_row = self.data_start_row + self.tree.index(selected[0])
+
+        # Update button states
+        self.update_button_states()
 
     def update_row(self):
         if not self.excel_path or not self.selected_sheet or not self.selected_row:
@@ -1638,13 +1655,12 @@ class Tab2Entry:
             ws = wb[self.selected_sheet]
             row = self.selected_row
 
-            # Escape path untuk kompatibilitas Jepang
-            escaped_renrakusho_path = escape_path_for_japanese_locale(
+            # Simpan path dalam format tampilan Jepang
+            renrakusho_path = convert_path_to_display_style(
                 self.entry_renrakusho.get() or ""
             )
 
             ws.cell(row=row, column=1).value = self.entry_hassei_month.get() or ""
-            # col 2 (累計) akan direindex ulang
             ws.cell(row=row, column=3).value = self.entry_no.get() or ""
             ws.cell(row=row, column=4).value = self.entry_date.get() or ""
             ws.cell(row=row, column=5).value = self.cbo_koumoku.get() or ""
@@ -1654,11 +1670,10 @@ class Tab2Entry:
             ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
             ws.cell(row=row, column=11).value = (
-                escaped_renrakusho_path  # Path dalam format escaped
+                renrakusho_path  # Disimpan dalam format tampilan
             )
             ws.cell(row=row, column=12).value = self.entry_furyo_no.get() or ""
 
-            # reindex all
             self.reindex_excel(ws)
             wb.save(self.excel_path)
             self.load_excel_to_tree()
@@ -1666,7 +1681,7 @@ class Tab2Entry:
 
         except Exception as e:
             messagebox.showerror(
-                JP_LABELS["error"], f"{JP_LABELS['error_select_row']} {str(e)}"
+                JP_LABELS["error"], f"{JP_LABELS['error_update_row']} {str(e)}"
             )
 
     def delete_row(self):

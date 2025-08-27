@@ -8,6 +8,7 @@ from excel_utils import (
     convert_path_to_display_style,
     convert_path_to_windows_style,
     open_file_safely,
+    unescape_path_for_japanese_locale,
 )
 
 
@@ -1358,7 +1359,12 @@ class Tab2Entry:
             return
 
         try:
-            open_file_safely(escaped_path)
+            # Unescape unicode escape sequences jika ada
+            unescaped_path = unescape_path_for_japanese_locale(escaped_path)
+            # Konversi ¥ ke \
+            real_path = convert_path_to_windows_style(unescaped_path)
+
+            open_file_safely(real_path)
         except FileNotFoundError:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
         except Exception as e:

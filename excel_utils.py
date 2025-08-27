@@ -188,6 +188,21 @@ def normalize_japanese_path(raw_path: str) -> str:
         return raw_path
 
 
+def unescape_path_for_japanese_locale(escaped_path: str) -> str:
+    """
+    Unescape path dari format Unicode escaped ke bentuk asli.
+    Contoh: "\\u0043\\u003a\\u005c\\u30c6\\u30b9\\u30c8" -> "C:\\テスト"
+    """
+    if not escaped_path:
+        return escaped_path
+    import codecs
+
+    try:
+        return codecs.decode(escaped_path, "unicode_escape")
+    except Exception:
+        return escaped_path  # Jika gagal, kembalikan apa adanya
+
+
 def convert_path_to_display_style(path: str) -> str:
     """
     Ubah path Windows ke format tampilan Jepang dengan mengganti '\\' menjadi '¥'.

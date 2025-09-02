@@ -69,18 +69,13 @@ class ExcelHistoryManager:
     def add(self, filepath):
         """
         Add file to history.
-        - Jangan resolve ke Path Windows (agar tidak memaksa backslash).
-        - Simpan sebagai tampilan Jepang (ganti '\' dan '/' menjadi '¥').
-        - Hilangkan duplikat dan batasi MAX_HISTORY.
+        Simpan path apa adanya tanpa konversi.
         """
-        raw = str(filepath)
-        # Jika datang dalam bentuk search-ms atau URL-encoded, normalkan dulu
-        raw = normalize_japanese_path(raw)
-        path_display = convert_path_to_display_style(raw)
+        raw = str(filepath).strip()
 
-        if path_display in self._items:
-            self._items.remove(path_display)
-        self._items.insert(0, path_display)
+        if raw in self._items:
+            self._items.remove(raw)
+        self._items.insert(0, raw)
         self._items = self._items[: self.max_items]
         self.save()
 
@@ -98,12 +93,10 @@ class ExcelHistoryManager:
         return list(self._items)
 
     def remove(self, filepath):
-        """Remove specific file from history (terima variasi separator)."""
-        raw = str(filepath)
-        raw = normalize_japanese_path(raw)
-        path_display = convert_path_to_display_style(raw)
-        if path_display in self._items:
-            self._items.remove(path_display)
+        """Remove specific file from history."""
+        raw = str(filepath).strip()
+        if raw in self._items:
+            self._items.remove(raw)
             self.save()
 
 
@@ -289,28 +282,22 @@ def convert_path_to_windows_style(path: str) -> str:
 
 def open_file_safely(file_path: str):
     """
-    Buka file dengan aman, mendukung path UNC dan karakter Unicode/Jepang.
-    - Terima path tampilan (separator '¥') atau campuran lain.
-    - Normalisasi ke Windows style untuk akses filesystem.
+    Buka file dengan aman.
+    Gunakan path apa adanya tanpa konversi.
     """
     if not file_path:
         raise ValueError("Path file tidak boleh kosong.")
 
-    # 1) Normalisasi input terlebih dahulu (search-ms, $uXXXX, \uXXXX, '/', UNC)
-    normalized = normalize_japanese_path(file_path)
-    # 2) Konversi tampilan '¥' ke Windows '\' untuk akses FS
-    real_path = convert_path_to_windows_style(normalized)
-
-    # Periksa keberadaan file
-    if not os.path.exists(real_path):
-        raise FileNotFoundError(f"File tidak ditemukan: {real_path}")
+    # Periksa keberadaan file langsung
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File tidak ditemukan: {file_path}")
 
     try:
         if os.name == "nt":  # Windows
-            os.startfile(real_path)
+            os.startfile(file_path)
         elif os.name == "posix":  # macOS/Linux
             opener = "open" if "darwin" in os.uname().sysname.lower() else "xdg-open"
-            subprocess.call([opener, real_path])
+            subprocess.call([opener, file_path])
     except Exception as e:
         raise RuntimeError(f"Gagal membuka file: {e}")
 

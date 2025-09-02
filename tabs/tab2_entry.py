@@ -2,13 +2,11 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
+import openpyxl
 from openpyxl.utils.datetime import from_excel
 from excel_utils import (
     ExcelHistoryManager,
-    convert_path_to_display_style,
-    convert_path_to_windows_style,
     open_file_safely,
-    unescape_path_for_japanese_locale,
 )
 
 
@@ -780,225 +778,77 @@ class Tab2Entry:
 
         row = 0
 
-        def add_row(label, widget):
-            nonlocal row
-            tk.Label(sec_form, text=label, width=12, anchor="w").grid(
-                row=row, column=0, sticky="w", pady=2
-            )
-            widget.grid(row=row, column=1, sticky="ew", pady=2)
-            row += 1
+        def add_row(self):
+            if not self.excel_path or not self.selected_sheet:
+                messagebox.showwarning(
+                    JP_LABELS["warning"], JP_LABELS["pick_excel_sheet"]
+                )
+                return
 
-        sec_form.grid_columnconfigure(1, weight=1)
+            try:
+                wb = load_workbook(self.excel_path)
+                ws = wb[self.selected_sheet]
 
-        # 発生月
-        self.entry_hassei_month = tk.Entry(sec_form, width=20)
-        self.btn_cal1 = tk.Button(
-            sec_form, text="📅", command=lambda: self.open_date(self.entry_hassei_month)
-        )
-        tk.Label(sec_form, text=JP_LABELS["hassei_month"], width=12, anchor="w").grid(
-            row=row, column=0, sticky="w", pady=2
-        )
-        self.entry_hassei_month.grid(row=row, column=1, sticky="ew", pady=2)
-        self.btn_cal1.grid(row=row, column=2, padx=2)
-        row += 1
+                # Get form data
+                hassei_month = self.entry_hassei_month.get() or ""
+                no = self.entry_no.get() or ""
+                date = self.entry_date.get() or ""
+                koumoku = self.cbo_koumoku.get() or ""
+                jishou = self.entry_jishou.get() or ""
+                ichiji = self.cbo_ichiji.get() or ""
+                niji = self.cbo_niji.get() or ""
+                hinban = self.entry_hinban.get() or ""
+                supplier = self.cbo_supplier.get() or ""
+                renrakusho_path = self.entry_renrakusho.get() or ""
+                furyo_no = self.entry_furyo_no.get() or ""
 
-        # 累計 (auto)
-        self.lbl_ruikei = tk.Label(sec_form, text=JP_LABELS["auto"], anchor="w")
-        add_row(JP_LABELS["ruikei"], self.lbl_ruikei)
+                # Validate required fields
+                if not no:
+                    messagebox.showwarning(JP_LABELS["warning"], "№は必須項目です。")
+                    return
 
-        # № (int)
-        vcmd = (sec_form.register(self.validate_int), "%P")
-        self.entry_no = tk.Entry(sec_form, validate="key", validatecommand=vcmd)
-        add_row(JP_LABELS["no"], self.entry_no)
+                # Check if No already exists
+                for row in ws.iter_rows(min_row=self.data_start_row, values_only=True):
+                    if row and len(row) > 2 and str(row[2]) == str(no):
+                        messagebox.showwarning(
+                            JP_LABELS["warning"], f"№{no}は既に存在します。"
+                        )
+                        return
 
-        # 発生日
-        self.entry_date = tk.Entry(sec_form, width=20)
-        self.btn_cal2 = tk.Button(
-            sec_form, text="📅", command=lambda: self.open_date(self.entry_date)
-        )
-        tk.Label(sec_form, text=JP_LABELS["hassei_date"], width=12, anchor="w").grid(
-            row=row, column=0, sticky="w", pady=2
-        )
-        self.entry_date.grid(row=row, column=1, sticky="ew", pady=2)
-        self.btn_cal2.grid(row=row, column=2, padx=2)
-        row += 1
+                # Find next empty row
+                next_row = ws.max_row + 1
+                ruikei = next_row - self.data_start_row + 1
 
-        # 項目
-        self.cbo_koumoku = ttk.Combobox(sec_form, values=self.default_koumoku, width=30)
-        add_row(JP_LABELS["koumoku"], self.cbo_koumoku)
+                # Add data to Excel
+                ws.cell(row=next_row, column=1, value=hassei_month)
+                ws.cell(row=next_row, column=2, value=ruikei)
+                ws.cell(row=next_row, column=3, value=no)
+                ws.cell(row=next_row, column=4, value=date)
+                ws.cell(row=next_row, column=5, value=koumoku)
+                ws.cell(row=next_row, column=6, value=jishou)
+                ws.cell(row=next_row, column=7, value=ichiji)
+                ws.cell(row=next_row, column=8, value=niji)
+                ws.cell(row=next_row, column=9, value=hinban)
+                ws.cell(row=next_row, column=10, value=supplier)
+                ws.cell(row=next_row, column=11, value=renrakusho_path)
+                ws.cell(row=next_row, column=12, value=furyo_no)
 
-        # 事象
-        self.entry_jishou = tk.Entry(sec_form, width=30)
-        add_row(JP_LABELS["jishou"], self.entry_jishou)
+                # Save workbook
+                wb.save(self.excel_path)
+                wb.close()
 
-        # 事象（一次）
-        self.cbo_ichiji = ttk.Combobox(sec_form, values=self.default_ichiji, width=30)
-        add_row(JP_LABELS["ichiji"], self.cbo_ichiji)
+                # Refresh TreeView
+                self.load_excel_to_tree()
 
-        # 事象（二次）
-        self.cbo_niji = ttk.Combobox(sec_form, values=self.default_niji, width=30)
-        add_row(JP_LABELS["niji"], self.cbo_niji)
+                # Clear form
+                self.clear_form()
 
-        # 品番
-        self.entry_hinban = tk.Entry(sec_form, width=30)
-        add_row(JP_LABELS["hinban"], self.entry_hinban)
+                messagebox.showinfo(JP_LABELS["success"], JP_LABELS["added_ok"])
 
-        # サプライヤー名
-        self.cbo_supplier = ttk.Combobox(
-            sec_form, values=self.default_suppliers, width=30
-        )
-        add_row(JP_LABELS["supplier"], self.cbo_supplier)
-
-        # 不良発生連絡書発行 (NEW FIELD)
-        frame_renrakusho = tk.Frame(sec_form)
-        frame_renrakusho.grid(row=row, column=1, sticky="ew", pady=2)
-        frame_renrakusho.grid_columnconfigure(0, weight=1)
-
-        self.entry_renrakusho = tk.Entry(frame_renrakusho)
-        self.entry_renrakusho.grid(row=0, column=0, sticky="ew")
-
-        self.btn_browse = tk.Button(
-            frame_renrakusho, text="📁", command=self.browse_renrakusho, width=3
-        )
-        self.btn_browse.grid(row=0, column=1, padx=2)
-
-        self.btn_open_file = tk.Button(
-            frame_renrakusho, text="📄", command=self.open_renrakusho_file, width=3
-        )
-        self.btn_open_file.grid(row=0, column=2, padx=2)
-        self.btn_open_file.config(state="disabled")  # disabled sampai ada file
-
-        tk.Label(sec_form, text=JP_LABELS["renrakusho"], width=12, anchor="w").grid(
-            row=row, column=0, sticky="w", pady=2
-        )
-        row += 1
-
-        # 不良発生№
-        self.entry_furyo_no = tk.Entry(sec_form, width=20)
-        add_row(JP_LABELS["furyo_no"], self.entry_furyo_no)
-
-        # Action buttons
-        sec_actions = tk.Frame(left)
-        sec_actions.pack(fill="x", pady=(6, 0))
-        self.btn_add = tk.Button(
-            sec_actions, text=JP_LABELS["save_add"], command=self.add_row, bg="#d4edda"
-        )
-        self.btn_add.pack(side="left")
-        self.btn_update = tk.Button(
-            sec_actions, text=JP_LABELS["update"], command=self.update_row, bg="#fff3cd"
-        )
-        self.btn_update.pack(side="left", padx=6)
-        self.btn_delete = tk.Button(
-            sec_actions, text=JP_LABELS["delete"], command=self.delete_row, bg="#f8d7da"
-        )
-        self.btn_delete.pack(side="left")
-        self.btn_clear = tk.Button(
-            sec_actions, text=JP_LABELS["clear"], command=self.clear_form
-        )
-        self.btn_clear.pack(side="left", padx=6)
-        self.btn_filter = tk.Button(
-            sec_actions,
-            text=JP_LABELS["filter"],
-            command=self.open_filter_dialog,
-            bg="#e2e3e5",
-        )
-        self.btn_filter.pack(side="left", padx=6)
-
-        # Store UI elements for enable/disable
-        self.ui_elements = {
-            "file_section": [self.btn_choose_file, self.cbo_sheet],
-            "form_section": [
-                self.entry_hassei_month,
-                self.btn_cal1,
-                self.entry_no,
-                self.entry_date,
-                self.btn_cal2,
-                self.cbo_koumoku,
-                self.entry_jishou,
-                self.cbo_ichiji,
-                self.cbo_niji,
-                self.entry_hinban,
-                self.cbo_supplier,
-                self.btn_browse,
-                self.entry_furyo_no,
-            ],
-            "action_buttons": [
-                self.btn_add,
-                self.btn_update,
-                self.btn_delete,
-                self.btn_clear,
-            ],
-            "always_enabled": [
-                self.btn_filter,
-                self.btn_open_file,
-                self.entry_renrakusho,
-            ],  # These stay enabled in filter mode
-        }
-
-        # ------------------------------
-        # Right: Tabbed Preview (Excel Data + Filter Result)
-        # ------------------------------
-        self.notebook = ttk.Notebook(right)
-        self.notebook.pack(fill="both", expand=True)
-
-        # Tab 1: Excel Data Preview
-        tab1 = ttk.Frame(self.notebook)
-        self.notebook.add(tab1, text=JP_LABELS["excel_preview"])
-
-        sec_preview1 = tk.LabelFrame(
-            tab1, text=JP_LABELS["excel_preview"], padx=8, pady=8
-        )
-        sec_preview1.pack(fill="both", expand=True)
-
-        container1 = tk.Frame(sec_preview1)
-        container1.pack(fill="both", expand=True)
-
-        self.tree = ttk.Treeview(container1, show="headings")
-        vsb1 = ttk.Scrollbar(container1, orient="vertical", command=self.tree.yview)
-        hsb1 = ttk.Scrollbar(container1, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(yscrollcommand=vsb1.set, xscrollcommand=hsb1.set)
-
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        vsb1.grid(row=0, column=1, sticky="ns")
-        hsb1.grid(row=1, column=0, sticky="ew")
-
-        container1.grid_rowconfigure(0, weight=1)
-        container1.grid_columnconfigure(0, weight=1)
-
-        # Tab 2: Filter Result
-        tab2 = ttk.Frame(self.notebook)
-        self.notebook.add(tab2, text=JP_LABELS["filter_result"])
-
-        sec_preview2 = tk.LabelFrame(
-            tab2, text=JP_LABELS["filter_result"], padx=8, pady=8
-        )
-        sec_preview2.pack(fill="both", expand=True)
-
-        container2 = tk.Frame(sec_preview2)
-        container2.pack(fill="both", expand=True)
-
-        self.filter_tree = ttk.Treeview(container2, show="headings")
-        vsb2 = ttk.Scrollbar(
-            container2, orient="vertical", command=self.filter_tree.yview
-        )
-        hsb2 = ttk.Scrollbar(
-            container2, orient="horizontal", command=self.filter_tree.xview
-        )
-        self.filter_tree.configure(yscrollcommand=vsb2.set, xscrollcommand=hsb2.set)
-
-        self.filter_tree.grid(row=0, column=0, sticky="nsew")
-        vsb2.grid(row=0, column=1, sticky="ns")
-        hsb2.grid(row=1, column=0, sticky="ew")
-
-        container2.grid_rowconfigure(0, weight=1)
-        container2.grid_columnconfigure(0, weight=1)
-
-        # Bind select events
-        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
-        self.filter_tree.bind("<<TreeviewSelect>>", self.on_filter_tree_select)
-
-        # Bind tab change event
-        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_change)
+            except Exception as e:
+                messagebox.showerror(
+                    JP_LABELS["error"], f"{JP_LABELS['error_add_row']} {str(e)}"
+                )
 
     # ==============================
     # UI State Management
@@ -1359,12 +1209,7 @@ class Tab2Entry:
             return
 
         try:
-            # Unescape unicode escape sequences jika ada
-            unescaped_path = unescape_path_for_japanese_locale(escaped_path)
-            # Konversi ¥ ke \
-            real_path = convert_path_to_windows_style(unescaped_path)
-
-            open_file_safely(real_path)
+            open_file_safely(escaped_path)
         except FileNotFoundError:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
         except Exception as e:
@@ -1552,137 +1397,212 @@ class Tab2Entry:
         return value.isdigit()
 
     def fill_form_with_data(self, vals, read_only=False):
-        """Fill form with data from tree selection"""
-        self.entry_hassei_month.delete(0, tk.END)
-        self.entry_hassei_month.insert(0, vals[0] if len(vals) > 0 else "")
+        """Fill form fields with data from selected tree item"""
+        try:
+            # Clear all fields first
+            self.clear_form()
 
-        self.entry_no.delete(0, tk.END)
-        self.entry_no.insert(0, vals[2] if len(vals) > 2 else "")
+            # Map data berdasarkan urutan kolom di TreeView
+            if len(vals) > 0:
+                self.entry_hassei_month.insert(0, str(vals[0]) if vals[0] else "")
+            if len(vals) > 1:
+                self.lbl_ruikei.config(text=str(vals[1]) if vals[1] else "")
+            if len(vals) > 2:
+                self.entry_no.insert(0, str(vals[2]) if vals[2] else "")
+            if len(vals) > 3:
+                self.entry_date.insert(0, str(vals[3]) if vals[3] else "")
+            if len(vals) > 4:
+                self.cbo_koumoku.set(str(vals[4]) if vals[4] else "")
+            if len(vals) > 5:
+                self.entry_jishou.insert(0, str(vals[5]) if vals[5] else "")
+            if len(vals) > 6:
+                self.cbo_ichiji.set(str(vals[6]) if vals[6] else "")
+            if len(vals) > 7:
+                self.cbo_niji.set(str(vals[7]) if vals[7] else "")
+            if len(vals) > 8:
+                self.entry_hinban.insert(0, str(vals[8]) if vals[8] else "")
+            if len(vals) > 9:
+                self.cbo_supplier.set(str(vals[9]) if vals[9] else "")
+            if len(vals) > 10:
+                self.entry_renrakusho.insert(0, str(vals[10]) if vals[10] else "")
+            if len(vals) > 11:
+                self.entry_furyo_no.insert(0, str(vals[11]) if vals[11] else "")
 
-        self.entry_date.delete(0, tk.END)
-        self.entry_date.insert(0, vals[3] if len(vals) > 3 else "")
+            # Enable/disable open button based on file existence
+            if len(vals) > 10:
+                renrakusho_path = str(vals[10]) if vals[10] else ""
+                if renrakusho_path and os.path.exists(renrakusho_path):
+                    self.btn_open_file.config(state="normal")
+                else:
+                    self.btn_open_file.config(state="disabled")
 
-        self.cbo_koumoku.set(vals[4] if len(vals) > 4 else "")
+            # Set selected_row only if not in read_only mode (filter mode)
+            if not read_only:
+                # This will be set by the calling function (on_tree_select)
+                pass
 
-        self.entry_jishou.delete(0, tk.END)
-        self.entry_jishou.insert(0, vals[5] if len(vals) > 5 else "")
-
-        self.cbo_ichiji.set(vals[6] if len(vals) > 6 else "")
-        self.cbo_niji.set(vals[7] if len(vals) > 7 else "")
-
-        self.entry_hinban.delete(0, tk.END)
-        self.entry_hinban.insert(0, vals[8] if len(vals) > 8 else "")
-
-        self.cbo_supplier.set(vals[9] if len(vals) > 9 else "")
-
-        # 不良発生連絡書発行 (simpan dalam format tampilan)
-        self.entry_renrakusho.delete(0, tk.END)
-        renrakusho_path = vals[10] if len(vals) > 10 else ""
-        self.entry_renrakusho.insert(0, renrakusho_path)
-
-        # Enable/disable open button based on file existence
-        real_path = convert_path_to_windows_style(renrakusho_path)
-        if real_path and os.path.exists(real_path):
-            self.btn_open_file.config(state="normal")
-        else:
-            self.btn_open_file.config(state="disabled")
-
-        self.entry_furyo_no.delete(0, tk.END)
-        self.entry_furyo_no.insert(0, vals[11] if len(vals) > 11 else "")
+        except Exception as e:
+            messagebox.showerror(
+                "エラー", f"データの読み込み中にエラーが発生しました: {str(e)}"
+            )
 
     # ==============================
     # CRUD ops on Excel
     # ==============================
     def add_row(self):
-        if not self.excel_path or not self.selected_sheet:
-            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_excel_sheet"])
-            return
-
+        """Add new row to Excel and TreeView"""
         try:
-            wb = load_workbook(self.excel_path)
-            ws = wb[self.selected_sheet]
+            if not self.current_file:
+                messagebox.showwarning("警告", "Excelファイルが開かれていません。")
+                return
 
-            current_data_count = len(self.all_data)
-            ruikei = current_data_count + 1
+            # Get form data
+            no = self.entry_no.get() or ""
+            hakken_date = self.entry_hakken_date.get() or ""
+            taisho_system = self.entry_taisho_system.get() or ""
+            taisho_version = self.entry_taisho_version.get() or ""
+            hakken_koutei = self.entry_hakken_koutei.get() or ""
+            gensho = self.entry_gensho.get() or ""
+            genin = self.entry_genin.get() or ""
+            taisaku = self.entry_taisaku.get() or ""
+            kakunin_houhou = self.entry_kakunin_houhou.get() or ""
+            kakunin_kekka = self.entry_kakunin_kekka.get() or ""
+            tantousha = self.entry_tantousha.get() or ""
+            priority = self.combo_priority.get() or ""
+            status = self.combo_status.get() or ""
 
-            # Simpan path dalam format tampilan Jepang
-            renrakusho_path = convert_path_to_display_style(
-                self.entry_renrakusho.get() or ""
-            )
+            # Simpan path apa adanya
+            renrakusho_path = self.entry_renrakusho.get() or ""
 
-            vals = [
-                self.entry_hassei_month.get() or "",
-                ruikei,
-                self.entry_no.get() or "",
-                self.entry_date.get() or "",
-                self.cbo_koumoku.get() or "",
-                self.entry_jishou.get() or "",
-                self.cbo_ichiji.get() or "",
-                self.cbo_niji.get() or "",
-                self.entry_hinban.get() or "",
-                self.cbo_supplier.get() or "",
-                renrakusho_path,  # Disimpan dalam format tampilan
-                self.entry_furyo_no.get() or "",
-            ]
-            ws.append(vals)
-            self.reindex_excel(ws)
-            wb.save(self.excel_path)
+            # Validate required fields
+            if not no:
+                messagebox.showwarning("警告", "No.は必須項目です。")
+                return
+
+            # Check if No already exists
+            if hasattr(self, "tree") and self.tree.get_children():
+                for item in self.tree.get_children():
+                    values = self.tree.item(item)["values"]
+                    if values and str(values[0]) == str(no):
+                        messagebox.showwarning("警告", f"No.{no}は既に存在します。")
+                        return
+
+            # Load workbook
+            wb = openpyxl.load_workbook(self.current_file)
+            ws = wb.active
+
+            # Find next empty row
+            next_row = ws.max_row + 1
+
+            # Add data to Excel
+            ws.cell(row=next_row, column=1, value=no)
+            ws.cell(row=next_row, column=2, value=hakken_date)
+            ws.cell(row=next_row, column=3, value=taisho_system)
+            ws.cell(row=next_row, column=4, value=taisho_version)
+            ws.cell(row=next_row, column=5, value=hakken_koutei)
+            ws.cell(row=next_row, column=6, value=gensho)
+            ws.cell(row=next_row, column=7, value=genin)
+            ws.cell(row=next_row, column=8, value=taisaku)
+            ws.cell(row=next_row, column=9, value=kakunin_houhou)
+            ws.cell(row=next_row, column=10, value=kakunin_kekka)
+            ws.cell(row=next_row, column=11, value=tantousha)
+            ws.cell(row=next_row, column=12, value=priority)
+            ws.cell(row=next_row, column=13, value=status)
+            ws.cell(row=next_row, column=14, value=renrakusho_path)
+
+            # Save workbook
+            wb.save(self.current_file)
+            wb.close()
+
+            # Refresh TreeView
             self.load_excel_to_tree()
-            messagebox.showinfo(JP_LABELS["success"], JP_LABELS["added_ok"])
+
+            # Clear form
+            self.clear_form()
+
+            messagebox.showinfo("成功", "データが追加されました。")
 
         except Exception as e:
             messagebox.showerror(
-                JP_LABELS["error"], f"{JP_LABELS['error_add_row']} {str(e)}"
+                "エラー", f"データの追加中にエラーが発生しました: {str(e)}"
             )
 
     def on_tree_select(self, event):
         """Handle selection in main tree view"""
         selected = self.tree.selection()
         if not selected:
+            self.selected_row = None
+            self.update_button_states()
             return
 
-        item = self.tree.item(selected[0])
-        vals = item.get("values", [])
-        self.fill_form_with_data(vals)
+        try:
+            item = self.tree.item(selected[0])
+            vals = item.get("values", [])
+            self.fill_form_with_data(vals, read_only=False)
 
-        # Set selected_row to Excel row index
-        self.selected_row = self.data_start_row + self.tree.index(selected[0])
+            # Set selected_row to Excel row index
+            self.selected_row = self.data_start_row + self.tree.index(selected[0])
 
-        # Update button states
-        self.update_button_states()
+            # Update button states
+            self.update_button_states()
+
+        except Exception as e:
+            messagebox.showerror(
+                "エラー", f"行選択処理中にエラーが発生しました: {str(e)}"
+            )
+            self.selected_row = None
+            self.update_button_states()
 
     def update_row(self):
         if not self.excel_path or not self.selected_sheet or not self.selected_row:
-            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_excel_first"])
+            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_row_first"])
             return
 
         try:
             wb = load_workbook(self.excel_path)
             ws = wb[self.selected_sheet]
-            row = self.selected_row
 
-            # Simpan path dalam format tampilan Jepang
-            renrakusho_path = convert_path_to_display_style(
-                self.entry_renrakusho.get() or ""
-            )
+            # Get form data
+            hassei_month = self.entry_hassei_month.get() or ""
+            no = self.entry_no.get() or ""
+            date = self.entry_date.get() or ""
+            koumoku = self.cbo_koumoku.get() or ""
+            jishou = self.entry_jishou.get() or ""
+            ichiji = self.cbo_ichiji.get() or ""
+            niji = self.cbo_niji.get() or ""
+            hinban = self.entry_hinban.get() or ""
+            supplier = self.cbo_supplier.get() or ""
+            renrakusho_path = self.entry_renrakusho.get() or ""
+            furyo_no = self.entry_furyo_no.get() or ""
 
-            ws.cell(row=row, column=1).value = self.entry_hassei_month.get() or ""
-            ws.cell(row=row, column=3).value = self.entry_no.get() or ""
-            ws.cell(row=row, column=4).value = self.entry_date.get() or ""
-            ws.cell(row=row, column=5).value = self.cbo_koumoku.get() or ""
-            ws.cell(row=row, column=6).value = self.entry_jishou.get() or ""
-            ws.cell(row=row, column=7).value = self.cbo_ichiji.get() or ""
-            ws.cell(row=row, column=8).value = self.cbo_niji.get() or ""
-            ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
-            ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
-            ws.cell(row=row, column=11).value = (
-                renrakusho_path  # Disimpan dalam format tampilan
-            )
-            ws.cell(row=row, column=12).value = self.entry_furyo_no.get() or ""
+            # Validate required fields
+            if not no:
+                messagebox.showwarning(JP_LABELS["warning"], "№は必須項目です。")
+                return
 
-            self.reindex_excel(ws)
+            # Update data in Excel
+            ws.cell(row=self.selected_row, column=1, value=hassei_month)
+            ws.cell(row=self.selected_row, column=3, value=no)
+            ws.cell(row=self.selected_row, column=4, value=date)
+            ws.cell(row=self.selected_row, column=5, value=koumoku)
+            ws.cell(row=self.selected_row, column=6, value=jishou)
+            ws.cell(row=self.selected_row, column=7, value=ichiji)
+            ws.cell(row=self.selected_row, column=8, value=niji)
+            ws.cell(row=self.selected_row, column=9, value=hinban)
+            ws.cell(row=self.selected_row, column=10, value=supplier)
+            ws.cell(row=self.selected_row, column=11, value=renrakusho_path)
+            ws.cell(row=self.selected_row, column=12, value=furyo_no)
+
+            # Save workbook
             wb.save(self.excel_path)
+            wb.close()
+
+            # Refresh TreeView
             self.load_excel_to_tree()
+
+            # Clear form
+            self.clear_form()
+
             messagebox.showinfo(JP_LABELS["success"], JP_LABELS["updated_ok"])
 
         except Exception as e:

@@ -6,9 +6,6 @@ from pathlib import Path
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import urllib.parse
-import subprocess
-import codecs
-import re
 
 TITLE = "不具合品一覧表"
 EXCEL_NAME = "不具合品一覧表.xlsx"
@@ -33,12 +30,6 @@ def get_config_dir():
 
 
 class ExcelHistoryManager:
-    """
-    Menyimpan history path file dalam format tampilan Jepang (separator '¥').
-    Saat mengambil dan menampilkan ke UI, gunakan apa adanya.
-    Saat membuka file, gunakan open_file_safely() yang akan konversi ke Windows style.
-    """
-
     def __init__(self, max_items=MAX_HISTORY):
         self.max_items = max_items
         self.config_dir = get_config_dir()
@@ -47,11 +38,12 @@ class ExcelHistoryManager:
         self._items = self._load()
 
     def _load(self):
-        """Load history from JSON file (sudah disimpan dalam format tampilan '¥')."""
+        """Load history from JSON file"""
         if self.path.exists():
             try:
                 with open(self.path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                # ensure it's a list of strings
                 if isinstance(data, list):
                     return [str(x) for x in data if isinstance(x, str)]
             except Exception:
@@ -67,15 +59,11 @@ class ExcelHistoryManager:
             print("Failed saving recent files:", e)
 
     def add(self, filepath):
-        """
-        Add file to history.
-        Simpan path apa adanya tanpa konversi.
-        """
-        raw = str(filepath).strip()
-
-        if raw in self._items:
-            self._items.remove(raw)
-        self._items.insert(0, raw)
+        """Add file to history"""
+        filepath = str(Path(filepath).resolve())
+        if filepath in self._items:
+            self._items.remove(filepath)
+        self._items.insert(0, filepath)
         self._items = self._items[: self.max_items]
         self.save()
 
@@ -89,14 +77,14 @@ class ExcelHistoryManager:
             pass
 
     def items(self):
-        """Get all history items (dalam format tampilan '¥')."""
+        """Get all history items"""
         return list(self._items)
 
     def remove(self, filepath):
-        """Remove specific file from history."""
-        raw = str(filepath).strip()
-        if raw in self._items:
-            self._items.remove(raw)
+        """Remove specific file from history"""
+        f = str(Path(filepath).resolve())
+        if f in self._items:
+            self._items.remove(f)
             self.save()
 
 
@@ -156,150 +144,74 @@ def create_excel_if_not_exists(folder, creator):
 
 def normalize_japanese_path(raw_path: str) -> str:
     """
-    Normalize path yang mungkin datang dari search-ms: URI atau URL-encoded.
-    - Decode URL (%xx)
-    - Ganti '/' menjadi '\\' untuk Windows style (sementara, sebelum tampilan)
-    - Perbaiki UNC '//' -> '\\\\'
+    Normalize Windows path that may contain Japanese characters encoded in search-ms: URI format.
+    Converts search-ms: URI to normal Windows path string.
+    If input is already a normal path, returns as is.
     """
     if not raw_path:
         return raw_path
 
-    s = raw_path.strip()
+    raw_path = raw_path.strip()
 
-    # Jika path diawali dengan 'search-ms:', coba ambil crumb=location:
-    if s.lower().startswith("search-ms:"):
+    # Jika path diawali dengan 'search-ms:', parse dan decode
+    if raw_path.lower().startswith("search-ms:"):
+        # Contoh format:
+        # search-ms:displayname=...&crumb=location:<encoded_path>
+        # Kita cari crumb=location: dan ambil sisanya
+
+        # Cari 'crumb=location:' di string
         crumb_prefix = "crumb=location:"
-        idx = s.lower().find(crumb_prefix)
+        idx = raw_path.lower().find(crumb_prefix)
         if idx != -1:
-            encoded_path = s[idx + len(crumb_prefix) :]
-            s = urllib.parse.unquote(encoded_path)
-        # jika tidak ditemukan, biarkan s apa adanya
+            # Ambil substring setelah crumb=location:
+            encoded_path = raw_path[idx + len(crumb_prefix) :]
+            # encoded_path bisa mengandung karakter %xx, decode URL
+            decoded_path = urllib.parse.unquote(encoded_path)
 
-    # Decode bentuk $uXXXX menjadi unicode nyata (contoh: $u3000)
-    s = _decode_dollar_u_sequences(s)
-    # Decode bentuk \uXXXX jika kebetulan ada
-    try:
-        s = codecs.decode(s, "unicode_escape")
-    except Exception:
-        pass
+            # Windows path biasanya diawali dengan \\server\share
+            # Pastikan diawali dengan backslash
+            if decoded_path.startswith("\\\\") or decoded_path.startswith("/"):
+                # Ganti / dengan \ jika ada
+                normalized_path = decoded_path.replace("/", "\\")
+                return normalized_path
+            else:
+                # Jika tidak sesuai, kembalikan hasil decode apa adanya
+                return decoded_path
 
-    # Untuk konsistensi internal Windows: '/' -> '\'
-    s = s.replace("/", "\\")
+        else:
+            # Jika crumb=location: tidak ditemukan, kembalikan apa adanya
+            return raw_path
 
-    # Pastikan UNC benar: '//' atau '\\' di-normalisasi ke '\\\\' diawal
-    if s.startswith("//"):
-        s = "\\" + s  # '//' -> '\//', lalu replace di bawah
-    if s.startswith("\\/"):
-        s = s.replace("\\/", "\\\\", 1)
-    if (
-        s.startswith("\\\\") is False
-        and s.startswith("\\")
-        and len(s) > 1
-        and s[1] == "\\"
-    ):
-        # Sudah \\X... tidak perlu
-        pass
-
-    # Bersihkan ganda campuran '/': ganti '\/' -> '\'
-    s = s.replace("\\/", "\\")
-    # Tidak gunakan Path.resolve agar tidak memaksa backslash saat menyimpan history
-    return s
+    else:
+        # Jika bukan search-ms, kembalikan apa adanya
+        return raw_path
 
 
-def _decode_dollar_u_sequences(s: str) -> str:
+def escape_path_for_japanese_locale(path: str) -> str:
     """
-    Ubah literal seperti $u3000 menjadi karakter unicode sebenarnya (U+3000).
-    Juga dukung $U+XXXX.
-    """
-    if not s:
-        return s
-
-    def repl(m):
-        hexpart = m.group(1) or m.group(2)
-        try:
-            codepoint = int(hexpart, 16)
-            return chr(codepoint)
-        except Exception:
-            return m.group(0)
-
-    # Pola $uXXXX atau $UXXXX atau $U+XXXX
-    return re.sub(r"\$u([0-9a-fA-F]{4})|\$U\+?([0-9a-fA-F]{4})", repl, s)
-
-
-def convert_path_to_display_style(path: str) -> str:
-    """
-    Ubah path ke format tampilan Jepang:
-    - Semua separator ('\\' dan '/') -> '¥'
-    - UNC leading: '\\\\server\\share' -> '¥¥server¥share'
+    Escape path ke format Unicode escaped agar kompatibel dengan sistem Jepang.
+    Contoh: "C:\\テスト" -> "\\u0043\\u003a\\u005c\\u30c6\\u30b9\\u30c8"
     """
     if not path:
         return path
-    # Normalisasi dulu agar konsisten
-    s = normalize_japanese_path(path)
-    # Ganti semua backslash menjadi '¥'
-    s = s.replace("\\\\", "¥¥")  # jaga UNC double
-    s = s.replace("\\", "¥")
-    # Ganti sisa '/' (jika ada) menjadi '¥'
-    s = s.replace("/", "¥")
-    return s
+    # Escape semua karakter ke Unicode
+    return "".join(f"\\u{ord(c):04x}" for c in path)
 
 
-def convert_path_to_windows_style(path: str) -> str:
+def unescape_path_for_japanese_locale(escaped_path: str) -> str:
     """
-    Konversi dari tampilan Jepang ke Windows path:
-    - '¥' -> '\\'
-    - '/' -> '\\'
-    - Perbaiki UNC menjadi '\\\\server\\share'
+    Unescape path dari format Unicode escaped ke bentuk asli.
+    Contoh: "\\u0043\\u003a\\u005c\\u30c6\\u30b9\\u30c8" -> "C:\\テスト"
     """
-    if not path:
-        return path
+    if not escaped_path:
+        return escaped_path
+    # Unescape \\uXXXX menjadi karakter asli
+    import codecs
 
-    s = path.strip()
-
-    # Decode $uXXXX / \uXXXX jika ada
-    s = _decode_dollar_u_sequences(s)
     try:
-        s = codecs.decode(s, "unicode_escape")
+        return codecs.decode(escaped_path, "unicode_escape")
     except Exception:
-        pass
-
-    # Tampilan mungkin sudah punya '¥'
-    s = s.replace("¥", "\\")
-    s = s.replace("/", "\\")
-
-    # Perbaiki variasi UNC yang mungkin muncul
-    if s.startswith("//"):
-        s = "\\" + s  # jadi '\//...'
-    s = s.replace("\\/", "\\")
-    if s.startswith("\\") and not s.startswith("\\\\"):
-        # Jika dimulai satu backslash saja dan berikutnya backslash, biarkan.
-        # Jika dimulai satu backslash saja sebelum server name, ubah ke dua.
-        parts = s.split("\\")
-        if len(parts) > 2 and parts[1] and parts[2]:
-            s = "\\" + s  # jadikan UNC
-    return s
-
-
-def open_file_safely(file_path: str):
-    """
-    Buka file dengan aman.
-    Gunakan path apa adanya tanpa konversi.
-    """
-    if not file_path:
-        raise ValueError("Path file tidak boleh kosong.")
-
-    # Periksa keberadaan file langsung
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File tidak ditemukan: {file_path}")
-
-    try:
-        if os.name == "nt":  # Windows
-            os.startfile(file_path)
-        elif os.name == "posix":  # macOS/Linux
-            opener = "open" if "darwin" in os.uname().sysname.lower() else "xdg-open"
-            subprocess.call([opener, file_path])
-    except Exception as e:
-        raise RuntimeError(f"Gagal membuka file: {e}")
+        return escaped_path  # Jika gagal, kembalikan apa adanya
 
 
 def append_excel(folder, rowdata, creator):

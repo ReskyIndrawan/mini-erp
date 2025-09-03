@@ -4,8 +4,6 @@ import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
 from excel_utils import (
     ExcelHistoryManager,
-    escape_path_for_japanese_locale,
-    unescape_path_for_japanese_locale,
 )
 
 
@@ -1355,8 +1353,7 @@ class Tab2Entry:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
-        # Unescape path sebelum dibuka
-        file_path = unescape_path_for_japanese_locale(escaped_path)
+        file_path = escaped_path
 
         if not os.path.exists(file_path):
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
@@ -1578,9 +1575,7 @@ class Tab2Entry:
             ruikei = current_data_count + 1
 
             # Escape path untuk kompatibilitas Jepang
-            escaped_renrakusho_path = escape_path_for_japanese_locale(
-                self.entry_renrakusho.get() or ""
-            )
+            renrakusho_path_raw = self.entry_renrakusho.get() or ""
 
             vals = [
                 self.entry_hassei_month.get() or "",  # Convert empty to ""
@@ -1593,7 +1588,7 @@ class Tab2Entry:
                 self.cbo_niji.get() or "",
                 self.entry_hinban.get() or "",
                 self.cbo_supplier.get() or "",
-                escaped_renrakusho_path,  # 不良発生連絡書発行 (col 11) - dalam format escaped
+                renrakusho_path_raw,  # 不良発生連絡書発行 (col 11) - dalam format escaped
                 self.entry_furyo_no.get() or "",  # 不良発生№ (col 12)
             ]
             ws.append(vals)
@@ -1639,9 +1634,7 @@ class Tab2Entry:
             row = self.selected_row
 
             # Escape path untuk kompatibilitas Jepang
-            escaped_renrakusho_path = escape_path_for_japanese_locale(
-                self.entry_renrakusho.get() or ""
-            )
+            renrakusho_path_raw = self.entry_renrakusho.get() or ""
 
             ws.cell(row=row, column=1).value = self.entry_hassei_month.get() or ""
             # col 2 (累計) akan direindex ulang
@@ -1654,7 +1647,7 @@ class Tab2Entry:
             ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
             ws.cell(row=row, column=11).value = (
-                escaped_renrakusho_path  # Path dalam format escaped
+                renrakusho_path_raw  # Path dalam format escaped
             )
             ws.cell(row=row, column=12).value = self.entry_furyo_no.get() or ""
 

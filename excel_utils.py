@@ -3,6 +3,7 @@ import datetime
 import json
 import sys
 from pathlib import Path
+from tkinter import filedialog
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import urllib.parse
@@ -212,6 +213,14 @@ def unescape_path_for_japanese_locale(escaped_path: str) -> str:
         return codecs.decode(escaped_path, "unicode_escape")
     except Exception:
         return escaped_path  # Jika gagal, kembalikan apa adanya
+
+
+def browse_file(path: str) -> str:
+
+    if not path:
+        return path
+        # Ubah \ menjadi ¥
+    return path.replace("\\", "¥")
 
 
 def append_excel(folder, rowdata, creator):

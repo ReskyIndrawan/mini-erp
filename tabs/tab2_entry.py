@@ -2,9 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
-from excel_utils import (
-    ExcelHistoryManager,
-)
+from excel_utils import ExcelHistoryManager, browse_file
 
 
 # ==============================
@@ -1353,7 +1351,8 @@ class Tab2Entry:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
-        file_path = escaped_path
+        # Ubah ¥ kembali menjadi \ untuk akses file sistem
+        file_path = escaped_path.replace("\\", "¥")
 
         if not os.path.exists(file_path):
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
@@ -1575,7 +1574,7 @@ class Tab2Entry:
             ruikei = current_data_count + 1
 
             # Escape path untuk kompatibilitas Jepang
-            renrakusho_path_raw = self.entry_renrakusho.get() or ""
+            renrakusho_path_raw = browse_file(self.entry_renrakusho.get() or "")
 
             vals = [
                 self.entry_hassei_month.get() or "",  # Convert empty to ""
@@ -1634,7 +1633,7 @@ class Tab2Entry:
             row = self.selected_row
 
             # Escape path untuk kompatibilitas Jepang
-            renrakusho_path_raw = self.entry_renrakusho.get() or ""
+            renrakusho_path_raw = browse_file(self.entry_renrakusho.get() or "")
 
             ws.cell(row=row, column=1).value = self.entry_hassei_month.get() or ""
             # col 2 (累計) akan direindex ulang

@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
-from excel_utils import ExcelHistoryManager, browse_file
+from excel_utils import ExcelHistoryManager
 
 
 # ==============================
@@ -628,6 +628,25 @@ class ExcelHistoryDialog(tk.Toplevel):
 # Tab2Entry (Master-Detail Layout with Filter)
 # ==============================
 class Tab2Entry:
+    def on_tree_select(self, event):
+        sel = self.tree.selection()
+        if not sel:
+            self.selected_row = None
+            self.update_button_states()
+            return
+
+        try:
+            item_id = sel[0]
+            vals = self.tree.item(item_id, "values")
+            base = self.data_start_row if self.data_start_row else 2
+            self.selected_row = self.tree.index(item_id) + base
+            self.fill_form_with_data(vals)
+            self.update_button_states()
+        except Exception as e:
+            messagebox.showerror(
+                JP_LABELS["error"], f"{JP_LABELS['error_select_row']} {str(e)}"
+            )
+
     def __init__(self, parent, app):
         self.app = app
         self.excel_path = None
@@ -1334,10 +1353,14 @@ class Tab2Entry:
         """Open file selection dialog"""
 
         def callback(file_path):
+            # Tampilkan dengan ¥
+            display_path = file_path.replace("\\", "¥") if file_path else ""
             self.entry_renrakusho.delete(0, tk.END)
-            self.entry_renrakusho.insert(0, file_path)
-            # Enable open button if file exists
-            if file_path and os.path.exists(file_path):
+            self.entry_renrakusho.insert(0, display_path)
+
+            # Enable open button jika path asli ada
+            actual_path = file_path  # sudah asli dari filedialog
+            if actual_path and os.path.exists(actual_path):
                 self.btn_open_file.config(state="normal")
             else:
                 self.btn_open_file.config(state="disabled")
@@ -1346,13 +1369,13 @@ class Tab2Entry:
 
     def open_renrakusho_file(self):
         """Open the selected file"""
-        escaped_path = self.entry_renrakusho.get().strip()
-        if not escaped_path:
+        display_path = self.entry_renrakusho.get().strip()
+        if not display_path:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
-        # Ubah ¥ kembali menjadi \ untuk akses file sistem
-        file_path = escaped_path.replace("\\", "¥")
+        # Konversi ¥ kembali ke \ untuk akses file sistem (path asli)
+        file_path = display_path.replace("¥", "\\")
 
         if not os.path.exists(file_path):
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
@@ -1360,7 +1383,7 @@ class Tab2Entry:
 
         try:
             if os.name == "nt":  # Windows
-                os.startfile(file_path)
+                os.startfile(file_path)  # Gunakan path asli
             elif os.name == "posix":  # macOS/Linux
                 subprocess.call(
                     [
@@ -1543,13 +1566,15 @@ class Tab2Entry:
 
         self.cbo_supplier.set(vals[9] if len(vals) > 9 else "")
 
-        # 不良発生連絡書発行
+        # 不良発生連絡書発行 (kolom 11 disimpan path asli di Excel)
+        path_from_excel = vals[10] if len(vals) > 10 else ""
+        display_path = path_from_excel.replace("\\", "¥") if path_from_excel else ""
         self.entry_renrakusho.delete(0, tk.END)
-        renrakusho_path = vals[10] if len(vals) > 10 else ""
-        self.entry_renrakusho.insert(0, renrakusho_path)
+        self.entry_renrakusho.insert(0, display_path)
 
-        # Enable/disable open button based on file existence
-        if renrakusho_path and os.path.exists(renrakusho_path):
+        # Enable/disable open button berdasarkan path asli
+        actual_path = path_from_excel
+        if actual_path and os.path.exists(actual_path):
             self.btn_open_file.config(state="normal")
         else:
             self.btn_open_file.config(state="disabled")
@@ -1573,11 +1598,13 @@ class Tab2Entry:
             current_data_count = len(self.all_data)
             ruikei = current_data_count + 1
 
-            # Escape path untuk kompatibilitas Jepang
-            renrakusho_path_raw = browse_file(self.entry_renrakusho.get() or "")
+            # Ambil path dari entry (format display dengan ¥)
+            display_path = self.entry_renrakusho.get() or ""
+            # Konversi ke path asli untuk disimpan ke Excel
+            actual_path = display_path.replace("¥", "\\") if display_path else ""
 
             vals = [
-                self.entry_hassei_month.get() or "",  # Convert empty to ""
+                self.entry_hassei_month.get() or "",
                 ruikei,  # 累計 (col 2)
                 self.entry_no.get() or "",  # № (col 3)
                 self.entry_date.get() or "",
@@ -1587,8 +1614,8 @@ class Tab2Entry:
                 self.cbo_niji.get() or "",
                 self.entry_hinban.get() or "",
                 self.cbo_supplier.get() or "",
-                renrakusho_path_raw,  # 不良発生連絡書発行 (col 11) - dalam format escaped
-                self.entry_furyo_no.get() or "",  # 不良発生№ (col 12)
+                actual_path,  # Simpan path asli ke Excel
+                self.entry_furyo_no.get() or "",
             ]
             ws.append(vals)
             # reindex setelah append untuk jaga konsistensi
@@ -1596,26 +1623,6 @@ class Tab2Entry:
             wb.save(self.excel_path)
             self.load_excel_to_tree()
             messagebox.showinfo(JP_LABELS["success"], JP_LABELS["added_ok"])
-
-        except Exception as e:
-            messagebox.showerror(
-                JP_LABELS["error"], f"{JP_LABELS['error_add_row']} {str(e)}"
-            )
-
-    def on_tree_select(self, event):
-        sel = self.tree.selection()
-        if not sel:
-            self.selected_row = None
-            self.update_button_states()
-            return
-
-        try:
-            vals = self.tree.item(sel[0], "values")
-            self.selected_row = (
-                self.tree.index(sel[0]) + self.data_start_row
-            )  # Excel row index
-            self.fill_form_with_data(vals)
-            self.update_button_states()  # Update button states when row is selected
 
         except Exception as e:
             messagebox.showerror(
@@ -1632,8 +1639,10 @@ class Tab2Entry:
             ws = wb[self.selected_sheet]
             row = self.selected_row
 
-            # Escape path untuk kompatibilitas Jepang
-            renrakusho_path_raw = browse_file(self.entry_renrakusho.get() or "")
+            # Ambil path dari entry (format display dengan ¥)
+            display_path = self.entry_renrakusho.get() or ""
+            # Konversi ke path asli untuk disimpan ke Excel
+            actual_path = display_path.replace("¥", "\\") if display_path else ""
 
             ws.cell(row=row, column=1).value = self.entry_hassei_month.get() or ""
             # col 2 (累計) akan direindex ulang
@@ -1645,9 +1654,7 @@ class Tab2Entry:
             ws.cell(row=row, column=8).value = self.cbo_niji.get() or ""
             ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
-            ws.cell(row=row, column=11).value = (
-                renrakusho_path_raw  # Path dalam format escaped
-            )
+            ws.cell(row=row, column=11).value = actual_path  # Simpan path asli
             ws.cell(row=row, column=12).value = self.entry_furyo_no.get() or ""
 
             # reindex all

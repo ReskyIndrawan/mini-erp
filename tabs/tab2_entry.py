@@ -686,7 +686,7 @@ class Tab2Entry:
         )
         self.lbl_file.pack(side="left", padx=8)
         self.btn_history = tk.Button(
-            file_row, text="履歴📋", command=self.show_history, width=3, bg="#e9ecef"
+            file_row, text="履歴📋", command=self.show_history, width=7, bg="#e9ecef"
         )
         self.btn_history.pack(side="left", padx=2)
 
@@ -1374,16 +1374,22 @@ class Tab2Entry:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
-        # Konversi ¥ kembali ke \ untuk akses file sistem (path asli)
-        file_path = display_path.replace("¥", "\\")
+        # Tentukan apakah ini share file atau local file
+        if display_path.startswith("¥¥"):
+            # Untuk share file, gunakan simbol yen
+            file_path = display_path
+        else:
+            # Untuk local file, konversi ¥ ke \ jika diperlukan
+            file_path = display_path.replace("¥", "\\")
 
+        # Cek keberadaan file
         if not os.path.exists(file_path):
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
         try:
             if os.name == "nt":  # Windows
-                os.startfile(file_path)  # Gunakan path asli
+                os.startfile(file_path)
             elif os.name == "posix":  # macOS/Linux
                 subprocess.call(
                     [
@@ -1473,8 +1479,8 @@ class Tab2Entry:
             for i, h in enumerate(headers):
                 col_values = []
                 for row in ws.iter_rows(min_row=self.data_start_row, values_only=True):
-                    if i < len(row) and row[i] is not None:
-                        col_values.append(str(row[i]))
+                    if i < len(row):
+                        col_values.append(self.format_cell_value(row[i]))
                     else:
                         col_values.append("")
 
@@ -1487,11 +1493,11 @@ class Tab2Entry:
 
             # Load data starting from detected data row
             for row in ws.iter_rows(min_row=self.data_start_row, values_only=True):
-                # Convert None to empty string for display
-                clean_row = [cell if cell is not None else "" for cell in row]
+                # Format each cell value for display
+                clean_row = [self.format_cell_value(cell) for cell in row]
                 self.tree.insert("", tk.END, values=clean_row)
-                # Store original data (with None values) for filtering
-                self.all_data.append(row)
+                # Store formatted data for filtering
+                self.all_data.append(clean_row)
 
             # Update ruikei label (jumlah data)
             data_count = len(self.all_data)
@@ -1503,6 +1509,17 @@ class Tab2Entry:
             messagebox.showerror(
                 JP_LABELS["error"], f"{JP_LABELS['error_loading_excel']} {str(e)}"
             )
+
+    def format_cell_value(self, value):
+        """Convert Excel cell value to display-friendly string"""
+        if isinstance(value, datetime.datetime):
+            return value.strftime("%Y-%m-%d")  # hilangkan jam 00:00:00
+        elif isinstance(value, datetime.date):
+            return value.strftime("%Y-%m-%d")
+        elif value is None:
+            return ""
+        else:
+            return str(value)
 
     # ==============================
     # Date Picker helpers
@@ -1582,9 +1599,10 @@ class Tab2Entry:
         self.entry_furyo_no.delete(0, tk.END)
         self.entry_furyo_no.insert(0, vals[11] if len(vals) > 11 else "")
 
-    # ==============================
-    # CRUD ops on Excel
-    # ==============================
+        # ==============================
+        # CRUD ops on Excel
+        # ==============================
+
     def add_row(self):
         if not self.excel_path or not self.selected_sheet:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_excel_sheet"])
@@ -1600,22 +1618,31 @@ class Tab2Entry:
 
             # Ambil path dari entry (format display dengan ¥)
             display_path = self.entry_renrakusho.get() or ""
-            # Konversi ke path asli untuk disimpan ke Excel
-            actual_path = display_path.replace("¥", "\\") if display_path else ""
+
+            # Tentukan format path untuk disimpan ke Excel
+            if display_path.startswith("¥¥"):
+                # Untuk share file, simpan dengan simbol yen
+                actual_path = display_path
+            else:
+                # Untuk local file, konversi ke backslash untuk disimpan
+                actual_path = display_path.replace("¥", "\\") if display_path else ""
+
+            date_val = self.entry_date.get().strip()
+            hassei_month = self.entry_hassei_month.get().strip()
 
             vals = [
-                self.entry_hassei_month.get() or "",
-                ruikei,  # 累計 (col 2)
-                self.entry_no.get() or "",  # № (col 3)
-                self.entry_date.get() or "",
-                self.cbo_koumoku.get() or "",
-                self.entry_jishou.get() or "",
-                self.cbo_ichiji.get() or "",
-                self.cbo_niji.get() or "",
-                self.entry_hinban.get() or "",
-                self.cbo_supplier.get() or "",
-                actual_path,  # Simpan path asli ke Excel
-                self.entry_furyo_no.get() or "",
+                hassei_month,
+                ruikei,
+                self.entry_no.get().strip(),
+                date_val,  # <= string "YYYY-MM-DD"
+                self.cbo_koumoku.get().strip(),
+                self.entry_jishou.get().strip(),
+                self.cbo_ichiji.get().strip(),
+                self.cbo_niji.get().strip(),
+                self.entry_hinban.get().strip(),
+                self.cbo_supplier.get().strip(),
+                actual_path,
+                self.entry_furyo_no.get().strip(),
             ]
             ws.append(vals)
             # reindex setelah append untuk jaga konsistensi
@@ -1641,20 +1668,29 @@ class Tab2Entry:
 
             # Ambil path dari entry (format display dengan ¥)
             display_path = self.entry_renrakusho.get() or ""
-            # Konversi ke path asli untuk disimpan ke Excel
-            actual_path = display_path.replace("¥", "\\") if display_path else ""
 
-            ws.cell(row=row, column=1).value = self.entry_hassei_month.get() or ""
-            # col 2 (累計) akan direindex ulang
-            ws.cell(row=row, column=3).value = self.entry_no.get() or ""
-            ws.cell(row=row, column=4).value = self.entry_date.get() or ""
+            # Tentukan format path untuk disimpan ke Excel
+            if display_path.startswith("¥¥"):
+                # Untuk share file, simpan dengan simbol yen
+                actual_path = display_path
+            else:
+                # Untuk local file, konversi ke backslash untuk disimpan
+                actual_path = display_path.replace("¥", "\\") if display_path else ""
+
+            ws.cell(row=row, column=1).value = self.entry_hassei_month.get().strip()
+            ws.cell(row=row, column=3).value = self.entry_no.get().strip()
+            ws.cell(row=row, column=4).value = (
+                self.entry_date.get().strip()
+            )  # hanya string tanggal
             ws.cell(row=row, column=5).value = self.cbo_koumoku.get() or ""
             ws.cell(row=row, column=6).value = self.entry_jishou.get() or ""
             ws.cell(row=row, column=7).value = self.cbo_ichiji.get() or ""
             ws.cell(row=row, column=8).value = self.cbo_niji.get() or ""
             ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
-            ws.cell(row=row, column=11).value = actual_path  # Simpan path asli
+            ws.cell(row=row, column=11).value = (
+                actual_path  # Simpan path sesuai jenisnya
+            )
             ws.cell(row=row, column=12).value = self.entry_furyo_no.get() or ""
 
             # reindex all

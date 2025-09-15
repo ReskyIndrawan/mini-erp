@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
-from excel_utils import ExcelHistoryManager
+from excel_utils import ExcelHistoryManager, to_display_path, to_real_path
 
 
 # ==============================
@@ -1374,13 +1374,8 @@ class Tab2Entry:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
-        # Tentukan apakah ini share file atau local file
-        if display_path.startswith("¥¥"):
-            # Untuk share file, gunakan simbol yen
-            file_path = display_path
-        else:
-            # Untuk local file, konversi ¥ ke \ jika diperlukan
-            file_path = display_path.replace("¥", "\\")
+        # Konversi display path (¥) ke real path (\) untuk semua kasus
+        file_path = display_path.replace("¥", "\\")
 
         # Cek keberadaan file
         if not os.path.exists(file_path):
@@ -1605,47 +1600,45 @@ class Tab2Entry:
 
     def add_row(self):
         if not self.excel_path or not self.selected_sheet:
-            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_excel_sheet"])
+            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_excel_first"])
             return
 
         try:
+            from openpyxl.styles import Font
+
             wb = load_workbook(self.excel_path)
             ws = wb[self.selected_sheet]
 
-            # ruikei = jumlah data existing + 1
-            current_data_count = len(self.all_data)
-            ruikei = current_data_count + 1
+            # Ambil path dari entry (display format dengan ¥)
+            display_path = self.entry_renrakusho.get().strip()
+            # Konversi ke real path untuk disimpan
+            actual_path = self.to_real_path(display_path)
 
-            # Ambil path dari entry (format display dengan ¥)
-            display_path = self.entry_renrakusho.get() or ""
+            # Find next empty row
+            next_row = ws.max_row + 1
 
-            # Tentukan format path untuk disimpan ke Excel
-            if display_path.startswith("¥¥"):
-                # Untuk share file, simpan dengan simbol yen
-                actual_path = display_path
-            else:
-                # Untuk local file, konversi ke backslash untuk disimpan
-                actual_path = display_path.replace("¥", "\\") if display_path else ""
+            ws.cell(row=next_row, column=1).value = (
+                self.entry_hassei_month.get().strip()
+            )
+            ws.cell(row=next_row, column=3).value = self.entry_no.get().strip()
+            ws.cell(row=next_row, column=4).value = self.entry_date.get().strip()
+            ws.cell(row=next_row, column=5).value = self.cbo_koumoku.get() or ""
+            ws.cell(row=next_row, column=6).value = self.entry_jishou.get() or ""
+            ws.cell(row=next_row, column=7).value = self.cbo_ichiji.get() or ""
+            ws.cell(row=next_row, column=8).value = self.cbo_niji.get() or ""
+            ws.cell(row=next_row, column=9).value = self.entry_hinban.get() or ""
+            ws.cell(row=next_row, column=10).value = self.cbo_supplier.get() or ""
 
-            date_val = self.entry_date.get().strip()
-            hassei_month = self.entry_hassei_month.get().strip()
+            # Simpan path sebagai hyperlink di kolom 11
+            path_cell = ws.cell(row=next_row, column=11)
+            path_cell.value = actual_path
+            if actual_path:  # Hanya buat hyperlink jika ada path
+                path_cell.hyperlink = actual_path
+                path_cell.font = Font(color="0000FF", underline="single")
 
-            vals = [
-                hassei_month,
-                ruikei,
-                self.entry_no.get().strip(),
-                date_val,  # <= string "YYYY-MM-DD"
-                self.cbo_koumoku.get().strip(),
-                self.entry_jishou.get().strip(),
-                self.cbo_ichiji.get().strip(),
-                self.cbo_niji.get().strip(),
-                self.entry_hinban.get().strip(),
-                self.cbo_supplier.get().strip(),
-                actual_path,
-                self.entry_furyo_no.get().strip(),
-            ]
-            ws.append(vals)
-            # reindex setelah append untuk jaga konsistensi
+            ws.cell(row=next_row, column=12).value = self.entry_furyo_no.get() or ""
+
+            # reindex all
             self.reindex_excel(ws)
             wb.save(self.excel_path)
             self.load_excel_to_tree()
@@ -1653,7 +1646,7 @@ class Tab2Entry:
 
         except Exception as e:
             messagebox.showerror(
-                JP_LABELS["error"], f"{JP_LABELS['error_add_row']} {str(e)}"
+                JP_LABELS["error"], f"{JP_LABELS['error_adding_row']} {str(e)}"
             )
 
     def update_row(self):
@@ -1662,35 +1655,34 @@ class Tab2Entry:
             return
 
         try:
+            from openpyxl.styles import Font
+
             wb = load_workbook(self.excel_path)
             ws = wb[self.selected_sheet]
             row = self.selected_row
 
-            # Ambil path dari entry (format display dengan ¥)
-            display_path = self.entry_renrakusho.get() or ""
-
-            # Tentukan format path untuk disimpan ke Excel
-            if display_path.startswith("¥¥"):
-                # Untuk share file, simpan dengan simbol yen
-                actual_path = display_path
-            else:
-                # Untuk local file, konversi ke backslash untuk disimpan
-                actual_path = display_path.replace("¥", "\\") if display_path else ""
+            # Ambil path dari entry (display format dengan ¥)
+            display_path = self.entry_renrakusho.get().strip()
+            # Konversi ke real path untuk disimpan
+            actual_path = self.to_real_path(display_path)
 
             ws.cell(row=row, column=1).value = self.entry_hassei_month.get().strip()
             ws.cell(row=row, column=3).value = self.entry_no.get().strip()
-            ws.cell(row=row, column=4).value = (
-                self.entry_date.get().strip()
-            )  # hanya string tanggal
+            ws.cell(row=row, column=4).value = self.entry_date.get().strip()
             ws.cell(row=row, column=5).value = self.cbo_koumoku.get() or ""
             ws.cell(row=row, column=6).value = self.entry_jishou.get() or ""
             ws.cell(row=row, column=7).value = self.cbo_ichiji.get() or ""
             ws.cell(row=row, column=8).value = self.cbo_niji.get() or ""
             ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
-            ws.cell(row=row, column=11).value = (
-                actual_path  # Simpan path sesuai jenisnya
-            )
+
+            # Simpan path sebagai hyperlink di kolom 11
+            path_cell = ws.cell(row=row, column=11)
+            path_cell.value = actual_path
+            if actual_path:  # Hanya buat hyperlink jika ada path
+                path_cell.hyperlink = actual_path
+                path_cell.font = Font(color="0000FF", underline="single")
+
             ws.cell(row=row, column=12).value = self.entry_furyo_no.get() or ""
 
             # reindex all

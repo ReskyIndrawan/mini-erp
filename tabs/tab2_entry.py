@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 import os, datetime, calendar, subprocess
 from openpyxl import load_workbook
-from excel_utils import ExcelHistoryManager, to_display_path, to_real_path
+from excel_utils import ExcelHistoryManager, to_display_path, to_real_path, normalize_path, is_valid_path, format_excel_date, format_number
 
 
 # ==============================
@@ -1353,14 +1353,18 @@ class Tab2Entry:
         """Open file selection dialog"""
 
         def callback(file_path):
-            # Tampilkan dengan ¥
-            display_path = file_path.replace("\\", "¥") if file_path else ""
+            # Normalize and convert to display format
+            if file_path:
+                normalized_path = normalize_path(file_path)
+                display_path = to_display_path(normalized_path)
+            else:
+                display_path = ""
+
             self.entry_renrakusho.delete(0, tk.END)
             self.entry_renrakusho.insert(0, display_path)
 
-            # Enable open button jika path asli ada
-            actual_path = file_path  # sudah asli dari filedialog
-            if actual_path and os.path.exists(actual_path):
+            # Enable open button if path is valid
+            if is_valid_path(display_path):
                 self.btn_open_file.config(state="normal")
             else:
                 self.btn_open_file.config(state="disabled")
@@ -1374,11 +1378,11 @@ class Tab2Entry:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
-        # Konversi display path (¥) ke real path (\) untuk semua kasus
-        file_path = display_path.replace("¥", "\\")
+        # Convert display path to real path
+        file_path = to_real_path(display_path)
 
-        # Cek keberadaan file
-        if not os.path.exists(file_path):
+        # Check if file exists and is accessible
+        if not is_valid_path(display_path):
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["file_not_found"])
             return
 
@@ -1488,8 +1492,13 @@ class Tab2Entry:
 
             # Load data starting from detected data row
             for row in ws.iter_rows(min_row=self.data_start_row, values_only=True):
-                # Format each cell value for display
-                clean_row = [self.format_cell_value(cell) for cell in row]
+                # Format each cell value for display with improved date and number handling
+                clean_row = []
+                for col_idx, cell in enumerate(row):
+                    # Pass column index for specific formatting
+                    formatted_value = self.format_cell_value(cell, col_idx)
+                    clean_row.append(formatted_value)
+
                 self.tree.insert("", tk.END, values=clean_row)
                 # Store formatted data for filtering
                 self.all_data.append(clean_row)
@@ -1505,16 +1514,27 @@ class Tab2Entry:
                 JP_LABELS["error"], f"{JP_LABELS['error_loading_excel']} {str(e)}"
             )
 
-    def format_cell_value(self, value):
+    def format_cell_value(self, value, column_index=None):
         """Convert Excel cell value to display-friendly string"""
-        if isinstance(value, datetime.datetime):
-            return value.strftime("%Y-%m-%d")  # hilangkan jam 00:00:00
-        elif isinstance(value, datetime.date):
-            return value.strftime("%Y-%m-%d")
-        elif value is None:
+        if value is None:
             return ""
-        else:
-            return str(value)
+
+        # Handle specific column formatting
+        # Column indices: 0=発生月, 1=累計, 2=№, 3=発生日, 4=項目, etc.
+        if column_index is not None:
+            # 累計 (column 1) and № (column 2) should be formatted as integers
+            if column_index in [1, 2]:  # 累計 and № columns
+                return format_number(value)
+            # 発生月 (column 0) and 発生日 (column 3) should be formatted as dates
+            elif column_index in [0, 3]:  # 発生月 and 発生日 columns
+                return format_excel_date(value)
+
+        # For other columns or when column_index is not specified, use date formatter
+        # This will handle Excel serial dates, datetime objects, date objects, and string dates
+        formatted = format_excel_date(value)
+
+        # If format_excel_date couldn't parse it as a date, it returns the original value
+        return formatted
 
     # ==============================
     # Date Picker helpers
@@ -1580,13 +1600,12 @@ class Tab2Entry:
 
         # 不良発生連絡書発行 (kolom 11 disimpan path asli di Excel)
         path_from_excel = vals[10] if len(vals) > 10 else ""
-        display_path = path_from_excel.replace("\\", "¥") if path_from_excel else ""
+        display_path = to_display_path(path_from_excel) if path_from_excel else ""
         self.entry_renrakusho.delete(0, tk.END)
         self.entry_renrakusho.insert(0, display_path)
 
-        # Enable/disable open button berdasarkan path asli
-        actual_path = path_from_excel
-        if actual_path and os.path.exists(actual_path):
+        # Enable/disable open button based on path validity
+        if is_valid_path(display_path):
             self.btn_open_file.config(state="normal")
         else:
             self.btn_open_file.config(state="disabled")
@@ -1609,10 +1628,9 @@ class Tab2Entry:
             wb = load_workbook(self.excel_path)
             ws = wb[self.selected_sheet]
 
-            # Ambil path dari entry (display format dengan ¥)
+            # Get path from entry (display format with ¥) and convert to real path
             display_path = self.entry_renrakusho.get().strip()
-            # Konversi ke real path untuk disimpan
-            actual_path = self.to_real_path(display_path)
+            actual_path = to_real_path(display_path) if display_path else ""
 
             # Find next empty row
             next_row = ws.max_row + 1
@@ -1629,10 +1647,10 @@ class Tab2Entry:
             ws.cell(row=next_row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=next_row, column=10).value = self.cbo_supplier.get() or ""
 
-            # Simpan path sebagai hyperlink di kolom 11
+            # Save path as hyperlink in column 11
             path_cell = ws.cell(row=next_row, column=11)
             path_cell.value = actual_path
-            if actual_path:  # Hanya buat hyperlink jika ada path
+            if actual_path:  # Only create hyperlink if path exists
                 path_cell.hyperlink = actual_path
                 path_cell.font = Font(color="0000FF", underline="single")
 
@@ -1661,10 +1679,9 @@ class Tab2Entry:
             ws = wb[self.selected_sheet]
             row = self.selected_row
 
-            # Ambil path dari entry (display format dengan ¥)
+            # Get path from entry (display format with ¥) and convert to real path
             display_path = self.entry_renrakusho.get().strip()
-            # Konversi ke real path untuk disimpan
-            actual_path = self.to_real_path(display_path)
+            actual_path = to_real_path(display_path) if display_path else ""
 
             ws.cell(row=row, column=1).value = self.entry_hassei_month.get().strip()
             ws.cell(row=row, column=3).value = self.entry_no.get().strip()
@@ -1676,10 +1693,10 @@ class Tab2Entry:
             ws.cell(row=row, column=9).value = self.entry_hinban.get() or ""
             ws.cell(row=row, column=10).value = self.cbo_supplier.get() or ""
 
-            # Simpan path sebagai hyperlink di kolom 11
+            # Save path as hyperlink in column 11
             path_cell = ws.cell(row=row, column=11)
             path_cell.value = actual_path
-            if actual_path:  # Hanya buat hyperlink jika ada path
+            if actual_path:  # Only create hyperlink if path exists
                 path_cell.hyperlink = actual_path
                 path_cell.font = Font(color="0000FF", underline="single")
 

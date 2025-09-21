@@ -6,7 +6,6 @@ from pathlib import Path
 from tkinter import filedialog
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-import urllib.parse
 
 TITLE = "不具合品一覧表"
 EXCEL_NAME = "不具合品一覧表.xlsx"
@@ -144,15 +143,136 @@ def create_excel_if_not_exists(folder, creator):
 
 
 def to_display_path(path: str) -> str:
+    """Convert real path to display path with Japanese Yen symbol"""
     if not path:
         return ""
-    return path.replace("\\", "¥¥")
+    # Convert backslashes to Yen symbols for display
+    return path.replace("\\", "¥")
 
 
 def to_real_path(path: str) -> str:
+    """Convert display path with Yen symbols back to real path"""
     if not path:
         return ""
+    # Convert Yen symbols back to backslashes for file operations
     return path.replace("¥", "\\")
+
+
+def normalize_path(path: str) -> str:
+    """Normalize path to use consistent backslashes"""
+    if not path:
+        return ""
+    # Convert any forward slashes or mixed slashes to backslashes
+    normalized = path.replace("/", "\\")
+    # Replace any double backslashes with single ones
+    while "\\\\" in normalized:
+        normalized = normalized.replace("\\\\", "\\")
+    return normalized
+
+
+def is_valid_path(path: str) -> bool:
+    """Check if path exists and is accessible"""
+    if not path:
+        return False
+    try:
+        real_path = to_real_path(path)
+        return os.path.exists(real_path) and os.access(real_path, os.R_OK)
+    except (OSError, TypeError):
+        return False
+
+
+def get_filename_from_path(path: str) -> str:
+    """Extract filename from path (works with both ¥ and \\ separators)"""
+    if not path:
+        return ""
+    # Normalize path first
+    normalized = normalize_path(path)
+    # Get filename from the end of the path
+    return os.path.basename(normalized)
+
+
+def format_number(value):
+    """Format numeric value as integer if whole number, otherwise as string"""
+    if value is None:
+        return ""
+
+    try:
+        # Convert to float first to handle both int and float
+        num_value = float(value)
+
+        # Check if it's a whole number
+        if num_value.is_integer():
+            return str(int(num_value))
+        else:
+            return str(value)
+    except (ValueError, TypeError):
+        # If it can't be converted to number, return as string
+        return str(value)
+
+
+def format_excel_date(value):
+    """Format Excel date value for display"""
+    if value is None:
+        return ""
+
+    # Handle Excel serial dates (numbers like 421101) - but only if they're reasonable date ranges
+    if isinstance(value, (int, float)):
+        # Check if it's a reasonable Excel date (between 1900-01-01 and 2100-12-31)
+        # Excel dates: 1 = 1900-01-01, 73050 = 2100-12-31
+        if 1 <= value <= 73050:
+            try:
+                # Excel dates start from 1900-01-01, but Excel incorrectly treats 1900 as a leap year
+                # So we need to adjust by 1 day for dates after 1900-02-28
+                if value > 59:  # After 1900-02-28
+                    excel_date = datetime.datetime(1899, 12, 30) + datetime.timedelta(days=value)
+                else:
+                    excel_date = datetime.datetime(1899, 12, 31) + datetime.timedelta(days=value-1)
+
+                return excel_date.strftime("%Y-%m-%d")
+            except (ValueError, TypeError, OverflowError):
+                return str(value)
+        else:
+            # If it's not a reasonable Excel date, treat as regular number
+            return str(int(value)) if float(value).is_integer() else str(value)
+
+    # Handle datetime objects
+    elif isinstance(value, datetime.datetime):
+        return value.strftime("%Y-%m-%d")
+
+    # Handle date objects
+    elif isinstance(value, datetime.date):
+        return value.strftime("%Y-%m-%d")
+
+    # Handle string dates - try to parse common formats
+    elif isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return ""
+
+        # Try to parse various date formats
+        date_formats = [
+            "%Y-%m-%d",    # 2024-01-15
+            "%Y/%m/%d",    # 2024/01/15
+            "%d-%m-%Y",    # 15-01-2024
+            "%d/%m/%Y",    # 15/01/2024
+            "%m-%d-%Y",    # 01-15-2024
+            "%m/%d/%Y",    # 01/15/2024
+            "%Y年%m月%d日", # Japanese format
+        ]
+
+        for fmt in date_formats:
+            try:
+                parsed_date = datetime.datetime.strptime(value, fmt)
+                return parsed_date.strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+
+        # If no format matches, return original string
+        return value
+
+    # Handle any other type
+    else:
+        return str(value)
 
 
 def append_excel(folder, rowdata, creator):

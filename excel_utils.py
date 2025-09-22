@@ -147,6 +147,7 @@ def to_display_path(path: str) -> str:
     if not path:
         return ""
     # Convert backslashes to Yen symbols for display
+    # This will convert all backslashes including the first two in share paths
     return path.replace("\\", "¥")
 
 
@@ -155,6 +156,7 @@ def to_real_path(path: str) -> str:
     if not path:
         return ""
     # Convert Yen symbols back to backslashes for file operations
+    # This will convert all yen signs including the first two in share paths
     return path.replace("¥", "\\")
 
 
@@ -164,9 +166,19 @@ def normalize_path(path: str) -> str:
         return ""
     # Convert any forward slashes or mixed slashes to backslashes
     normalized = path.replace("/", "\\")
-    # Replace any double backslashes with single ones
-    while "\\\\" in normalized:
-        normalized = normalized.replace("\\\\", "\\")
+
+    # Check if this is a share path (starts with double backslash)
+    if normalized.startswith("\\\\"):
+        # For share paths, replace double backslashes with double yen signs
+        # but preserve the double backslash at the start
+        share_part = normalized[2:]  # Remove the first two backslashes
+        share_part = share_part.replace("\\\\", "¥¥")  # Convert remaining double backslashes to double yen
+        normalized = "\\\\" + share_part
+    else:
+        # For local paths, replace any double backslashes with single ones
+        while "\\\\" in normalized:
+            normalized = normalized.replace("\\\\", "\\")
+
     return normalized
 
 

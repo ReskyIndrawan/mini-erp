@@ -1528,6 +1528,9 @@ class Tab2Entry:
             # 発生月 (column 0) and 発生日 (column 3) should be formatted as dates
             elif column_index in [0, 3]:  # 発生月 and 発生日 columns
                 return format_excel_date(value)
+            else:
+                # For other specific columns, return as string
+                return str(value)
 
         # For other columns or when column_index is not specified, use date formatter
         # This will handle Excel serial dates, datetime objects, date objects, and string dates

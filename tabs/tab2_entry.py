@@ -965,7 +965,7 @@ class Tab2Entry:
         container1 = tk.Frame(sec_preview1)
         container1.pack(fill="both", expand=True)
 
-        self.tree = ttk.Treeview(container1, show="headings")
+        self.tree = ttk.Treeview(container1, show="headings", selectmode="extended")
         vsb1 = ttk.Scrollbar(container1, orient="vertical", command=self.tree.yview)
         hsb1 = ttk.Scrollbar(container1, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb1.set, xscrollcommand=hsb1.set)
@@ -1008,6 +1008,14 @@ class Tab2Entry:
         # Bind select events
         self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
         self.filter_tree.bind("<<TreeviewSelect>>", self.on_filter_tree_select)
+
+        # Bind keyboard events for multiple delete
+        self.tree.bind("<Delete>", self.on_key_delete)
+        self.tree.bind("<BackSpace>", self.on_key_delete)
+        # For Mac Command key
+        self.tree.bind("<Command-Delete>", self.on_key_delete)
+        # For Windows/Linux Control key
+        self.tree.bind("<Control-Delete>", self.on_key_delete)
 
         # Bind tab change event
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_change)
@@ -1716,6 +1724,63 @@ class Tab2Entry:
                 JP_LABELS["error"], f"{JP_LABELS['error_select_row']} {str(e)}"
             )
 
+    def on_key_delete(self, event):
+        """Handle Delete key press for multiple selection delete"""
+        if self.is_filter_mode:
+            return  # Don't allow delete in filter mode
+
+        selected_items = self.tree.selection()
+        if not selected_items:
+            return
+
+        # Check if multiple items are selected
+        if len(selected_items) > 1:
+            self.delete_multiple_rows(selected_items)
+        else:
+            # Single delete - use existing logic
+            self.delete_row()
+
+    def delete_multiple_rows(self, selected_items):
+        """Delete multiple selected rows"""
+        if not self.excel_path or not self.selected_sheet:
+            messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_excel_first"])
+            return
+
+        if not messagebox.askyesno(JP_LABELS["confirm"], f"{len(selected_items)} 件のデータを削除しますか？"):
+            return
+
+        try:
+            wb = load_workbook(self.excel_path)
+            ws = wb[self.selected_sheet]
+
+            # Convert selected items to Excel row indices and sort in descending order
+            # (to avoid index shifting when deleting)
+            base = self.data_start_row if self.data_start_row else 2
+            excel_rows = []
+
+            for item_id in selected_items:
+                row_index = self.tree.index(item_id) + base
+                excel_rows.append(row_index)
+
+            # Sort in descending order to delete from bottom to top
+            excel_rows.sort(reverse=True)
+
+            # Delete rows
+            for row in excel_rows:
+                ws.delete_rows(row, 1)
+
+            # Reindex all remaining rows
+            self.reindex_excel(ws)
+            wb.save(self.excel_path)
+            self.load_excel_to_tree()
+            self.clear_form()
+            messagebox.showinfo(JP_LABELS["deleted"], f"{len(excel_rows)} 件のデータを削除しました。")
+
+        except Exception as e:
+            messagebox.showerror(
+                JP_LABELS["error"], f"{JP_LABELS['error_delete_row']} {str(e)}"
+            )
+
     def delete_row(self):
         if not self.excel_path or not self.selected_sheet or not self.selected_row:
             messagebox.showwarning(JP_LABELS["warning"], JP_LABELS["pick_excel_first"])
@@ -1740,11 +1805,36 @@ class Tab2Entry:
             )
 
     def reindex_excel(self, ws):
-        """Set ulang 累計 (col 2) dan № (col 3) agar berurutan mulai 1"""
-        for i, row in enumerate(
-            ws.iter_rows(min_row=self.data_start_row, values_only=False), start=1
-        ):
-            if len(row) > 1:
-                row[1].value = i  # 累計 (B)
-            if len(row) > 2:
-                row[2].value = i  # № (C)
+        """Set ulang 累計 (col 2) dan № (col 3) agar berurutan mulai 1
+        Hanya menghitung baris yang benar-benar berisi data untuk menghindari bug
+        dengan tabel kosong yang terhitung"""
+        data_count = 0  # Counter untuk hanya data yang terisi
+
+        for row in ws.iter_rows(min_row=self.data_start_row, values_only=False):
+            # Cek apakah baris ini berisi data
+            has_data = False
+
+            # Cek beberapa kolom kunci untuk menentukan apakah baris ini berisi data
+            # Kolom yang dicek: 発生月 (1), № (3), 発生日 (4), 項目 (5)
+            key_columns = [0, 2, 3, 4]  # Index kolom (0-based)
+
+            for col_idx in key_columns:
+                if col_idx < len(row):
+                    cell_value = row[col_idx].value
+                    if cell_value is not None and str(cell_value).strip() != "":
+                        has_data = True
+                        break
+
+            # Jika baris berisi data, increment counter dan update 累計 dan №
+            if has_data:
+                data_count += 1
+                if len(row) > 1:  # 累計 (B column, index 1)
+                    row[1].value = data_count
+                if len(row) > 2:  # № (C column, index 2)
+                    row[2].value = data_count
+            else:
+                # Jika baris kosong, kosongkan juga 累計 dan №
+                if len(row) > 1:
+                    row[1].value = None
+                if len(row) > 2:
+                    row[2].value = None

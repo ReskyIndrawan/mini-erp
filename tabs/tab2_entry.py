@@ -1805,10 +1805,14 @@ class Tab2Entry:
             )
 
     def reindex_excel(self, ws):
-        """Set ulang 累計 (col 2) dan № (col 3) agar berurutan mulai 1
+        """Set ulang 累計 (col 2) dan № (col 3)
+        - 累計: berurutan berdasarkan total semua data seperti sebelumnya
+        - №: reset ke 1 setiap bulan
         Hanya menghitung baris yang benar-benar berisi data untuk menghindari bug
         dengan tabel kosong yang terhitung"""
-        data_count = 0  # Counter untuk hanya data yang terisi
+        total_count = 0  # Counter untuk 累計 (total semua data)
+        monthly_count = 0  # Counter untuk № per bulan
+        current_month = None  # Track current month for № numbering
 
         for row in ws.iter_rows(min_row=self.data_start_row, values_only=False):
             # Cek apakah baris ini berisi data
@@ -1825,13 +1829,68 @@ class Tab2Entry:
                         has_data = True
                         break
 
-            # Jika baris berisi data, increment counter dan update 累計 dan №
+            # Jika baris berisi data, update 累計 dan №
             if has_data:
-                data_count += 1
+                # Get month from 発生月 column (column 1, index 0)
+                month_value = None
+                if len(row) > 0 and row[0].value:
+                    month_value = row[0].value
+
+                    # Handle different date formats
+                    if isinstance(month_value, (int, float)):
+                        # Excel serial date
+                        try:
+                            if 1 <= month_value <= 73050:
+                                if month_value > 59:
+                                    excel_date = datetime.datetime(1899, 12, 30) + datetime.timedelta(days=month_value)
+                                else:
+                                    excel_date = datetime.datetime(1899, 12, 31) + datetime.timedelta(days=month_value-1)
+                                month_value = excel_date.month
+                            else:
+                                month_value = None
+                        except (ValueError, TypeError, OverflowError):
+                            month_value = None
+                    elif isinstance(month_value, str):
+                        # Try to extract month from string date
+                        try:
+                            # Handle YYYY-MM-DD format
+                            if '-' in month_value:
+                                parts = month_value.split('-')
+                                if len(parts) >= 2:
+                                    month_value = int(parts[1])
+                            # Handle other formats
+                            else:
+                                # Try to parse as date
+                                for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%d/%m/%Y"]:
+                                    try:
+                                        parsed_date = datetime.datetime.strptime(month_value.strip(), fmt)
+                                        month_value = parsed_date.month
+                                        break
+                                    except ValueError:
+                                        continue
+                        except (ValueError, TypeError):
+                            month_value = None
+                    elif isinstance(month_value, datetime.datetime):
+                        month_value = month_value.month
+                    elif isinstance(month_value, datetime.date):
+                        month_value = month_value.month
+
+                # Check if month changed, reset monthly counter if needed
+                if month_value is not None and month_value != current_month:
+                    current_month = month_value
+                    monthly_count = 0  # Reset counter for new month
+
+                # Increment counters
+                total_count += 1  # Always increment for total
+                monthly_count += 1  # Increment for monthly
+
+                # Update 累計 with total count
                 if len(row) > 1:  # 累計 (B column, index 1)
-                    row[1].value = data_count
+                    row[1].value = total_count
+
+                # Update № with monthly count
                 if len(row) > 2:  # № (C column, index 2)
-                    row[2].value = data_count
+                    row[2].value = monthly_count
             else:
                 # Jika baris kosong, kosongkan juga 累計 dan №
                 if len(row) > 1:

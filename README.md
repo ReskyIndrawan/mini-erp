@@ -68,8 +68,8 @@ Tab ini digunakan untuk memasukkan, mengelola, dan mencari data produk bermasala
 
 **Bagian Data Entry:**
 - **発生月 (Occurrence Month)**: Dropdown untuk memilih bulan terjadinya masalah
-- **累計 (Total)**: Field yang menampilkan total akumulasi (otomatis terisi)
-- **№ (Number)**: Field nomor urut (otomatis terisi)
+- **累計 (Total)**: Field yang menampilkan total akumulasi semua data (otomatis terisi)
+- **№ (Number)**: Field nomor urut per bulan (reset ke 1 setiap bulan, otomatis terisi)
 - **発生日 (Occurrence Date)**: Field tanggal terjadinya masalah dengan date picker
 - **項目 (Item)**: Field untuk kategori masalah
 - **事象 (Phenomenon)**: Field untuk deskripsi masalah utama
@@ -114,9 +114,11 @@ Tab ini digunakan untuk memasukkan, mengelola, dan mencari data produk bermasala
 4. Klik tombol **更新（編集）** untuk menyimpan perubahan
 
 **Menghapus Data:**
-1. Klik pada baris data di tabel preview
-2. Data akan otomatis terisi di form input
-3. Klik tombol **削除** untuk menghapus data (akan ada konfirmasi)
+1. **Single Delete**: Klik pada baris data di tabel preview, lalu klik tombol **削除** untuk menghapus data (akan ada konfirmasi)
+2. **Multiple Delete**:
+   - Pilih multiple baris data dengan menekan tombol `Ctrl` (Windows/Linux) atau `Cmd` (Mac) sambil klik pada baris yang ingin dipilih
+   - Atau gunakan `Shift` untuk memilih range baris
+   - Klik tombol **削除** untuk menghapus semua data yang dipilih (akan ada konfirmasi dengan jumlah data yang akan dihapus)
 
 **Menggunakan Filter:**
 1. Klik tombol **フィルタ**
@@ -150,8 +152,8 @@ Tab ini digunakan untuk memasukkan, mengelola, dan mencari data produk bermasala
   - Membersihkan form input
 
 - **削除**:
-  - Menampilkan dialog konfirmasi
-  - Menghapus data dari file Excel
+  - Menampilkan dialog konfirmasi (untuk single delete) atau dialog konfirmasi dengan jumlah data yang akan dihapus (untuk multiple delete)
+  - Menghapus data tunggal atau multiple data dari file Excel
   - Memperbarui tampilan preview
   - Membersihkan form input
 
@@ -165,6 +167,13 @@ Tab ini digunakan untuk memasukkan, mengelola, dan mencari data produk bermasala
 
 ## Fitur Tambahan
 
+### Multiple Delete
+Aplikasi sekarang mendukung penghapusan multiple data sekaligus:
+- Gunakan `Ctrl` (Windows/Linux) atau `Cmd` (Mac) + klik untuk memilih multiple baris secara acak
+- Gunakan `Shift` + klik untuk memilih range baris
+- Tombol **削除** akan menghapus semua data yang dipilih sekaligus
+- Dialog konfirmasi akan menampilkan jumlah data yang akan dihapus
+
 ### Date Picker
 Saat Anda mengklik field **発生日**, akan muncul date picker yang memungkinkan Anda memilih tanggal dengan mudah menggunakan kalender interaktif.
 
@@ -174,7 +183,14 @@ Aplikasi secara otomatis menyimpan history file Excel yang pernah dibuka (maksim
 - Linux/macOS: `~/.config/defect_data_app/recent_excel_files.json`
 
 ### Auto Numbering
-Field **№** dan **累計** akan otomatis terisi berdasarkan data yang sudah ada di file Excel.
+Sistem memiliki dua jenis penomoran otomatis:
+- **累計 (Total)**: Nomor urut berdasarkan total semua data yang ada di file Excel (1, 2, 3, dst)
+- **№ (Number)**: Nomor urut yang reset ke 1 setiap bulan berdasarkan **発生月 (Occurrence Month)**
+
+**Contoh:**
+- Data bulan 5: № = 1, 2, 3, ...
+- Data bulan 6: № = 1, 2, 3, ... (reset)
+- Data bulan 7: № = 1, 2, 3, ... (reset lagi)
 
 ### Data Validation
 Aplikasi melakukan validasi data sebelum menyimpan:
